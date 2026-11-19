@@ -4,6 +4,8 @@ import { ToolFailure } from "@opencode/ai/effect"
 import type { Context } from "@opencode/plugin/effect/plugin"
 import { Effect, Schema } from "effect"
 import { Loop } from "../../loop.js"
+import { LoopParse } from "../../loop/parse.js"
+import { LoopState } from "../../loop/state.js"
 
 // Two tools a looping agent uses to say how its run ended.
 //
@@ -109,5 +111,70 @@ export const Plugin = {
           }).pipe(Effect.mapError((error) => new ToolFailure({ message: "Could not pause the loop", error }))),
       })
     })
+
+    // The slash command. Its `prompt.text` holds only the arguments: the TUI strips
+    // the command word before it reaches the server, so nothing here removes "loop".
+    yield* ctx.command.transform((editor) => {
+      editor.add({
+        name: "loop",
+        description: "run an instruction on repeat, until the agent is done or blocked",
+        execute: (input) =>
+          Effect.gen(function* () {
+            const request = LoopParse.parseLoopRequest(input.prompt.text)
+
+            if (request.kind === "invalid") {
+              yield* reply(ctx, input.sessionID, `Cannot start a loop: ${request.reason}.`)
+              return
+            }
+
+            if (request.kind === "status") {
+              const record = yield* loop.status(input.sessionID)
+              yield* reply(ctx, input.sessionID, describe(record))
+              return
+            }
+
+            if (request.kind === "stop") {
+              const stopped = yield* loop.stop(input.sessionID, "stopped")
+              yield* reply(ctx, input.sessionID, stopped === undefined ? "There is no loop to stop." : "Loop stopped.")
+              return
+            }
+
+            // Starting over replaces the previous loop; say so, or a second /loop
+            // silently drops the first instruction the user thought was running.
+            const previous = yield* loop.status(input.sessionID)
+            const started = yield* loop.start({ sessionID: input.sessionID, request })
+            const what =
+              started.mode === "interval"
+                ? `every ${formatInterval(started.intervalMs ?? 0)}`
+                : "until it is done or blocked"
+            yield* reply(
+              ctx,
+              input.sessionID,
+              previous === undefined || previous.state === "ended" || previous.state === "paused"
+                ? `Loop started: ${what}.`
+                : `Loop started: ${what}. The previous loop was abandoned.`,
+            )
+          }).pipe(Effect.orDie),
+      })
+    })
   }),
 }
+
+/** One line describing a loop, for /loop status. */
+function describe(record: LoopState.Record | undefined): string {
+  if (record === undefined) return "No loop in this session."
+  const interval = record.mode === "interval" ? ` every ${formatInterval(record.intervalMs ?? 0)}` : ""
+  const ending = record.endReason === undefined ? "" : ` (${record.endReason})`
+  return `Loop ${record.state}${ending}${interval}: run ${record.iteration}, "${record.instruction}".`
+}
+
+/** Turns a millisecond interval back into the compact form the user typed. */
+function formatInterval(ms: number): string {
+  if (ms % 3_600_000 === 0) return `${ms / 3_600_000}h`
+  if (ms % 60_000 === 0) return `${ms / 60_000}m`
+  return `${Math.round(ms / 1000)}s`
+}
+
+/** Sends the command's one-line answer back into the session, where the user sees it. */
+const reply = (ctx: Context, sessionID: Parameters<Loop.Interface["status"]>[0], text: string) =>
+  ctx.session.prompt({ sessionID, text, delivery: "queue" }).pipe(Effect.asVoid)

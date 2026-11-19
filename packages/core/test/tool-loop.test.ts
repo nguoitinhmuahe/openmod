@@ -30,12 +30,25 @@ const direct = (registry: Tool.Interface, name: string, input: unknown) =>
     ),
   )
 
+/**
+ * The plugin registers a slash command alongside its tools, so the harness must
+ * accept a command editor even though these tests only exercise the tools.
+ */
+const register = () =>
+  registerToolPlugin(LoopTools.Plugin, {
+    command: {
+      list: () => Effect.die("unused command.list"),
+      reload: () => Effect.void,
+      transform: (callback) => Effect.sync(() => callback({ add: () => {} })),
+    },
+  })
+
 describe("loop tools", () => {
   it.effect("loop_complete ends the loop as completed and keeps the summary", () =>
     Effect.gen(function* () {
       const loop = yield* Loop.Service
       yield* loop.start({ sessionID, request: { kind: "start", mode: "until-done", instruction: "x" } })
-      yield* registerToolPlugin(LoopTools.Plugin)
+      yield* register()
       yield* direct(yield* Tool.Service, "loop_complete", { summary: "build is green" })
       const after = yield* loop.status(sessionID)
       expect(after?.state).toBe("ended")
@@ -48,7 +61,7 @@ describe("loop tools", () => {
     Effect.gen(function* () {
       const loop = yield* Loop.Service
       yield* loop.start({ sessionID, request: { kind: "start", mode: "until-done", instruction: "x" } })
-      yield* registerToolPlugin(LoopTools.Plugin)
+      yield* register()
       yield* direct(yield* Tool.Service, "loop_blocked", { reason: "needs a credential" })
       const after = yield* loop.status(sessionID)
       expect(after?.state).toBe("paused")
@@ -62,7 +75,7 @@ describe("loop tools", () => {
       const loop = yield* Loop.Service
       yield* loop.start({ sessionID, request: { kind: "start", mode: "until-done", instruction: "x" } })
       yield* loop.stop(sessionID, "stopped")
-      yield* registerToolPlugin(LoopTools.Plugin)
+      yield* register()
       yield* direct(yield* Tool.Service, "loop_complete", {})
       expect((yield* loop.status(sessionID))?.endReason).toBe("stopped")
     }).pipe(Effect.provide(loopLayer)),

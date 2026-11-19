@@ -2,7 +2,8 @@ export * as Loop from "./loop.js"
 
 import { Clock, Context, Effect, Layer } from "effect"
 import type { SessionID } from "@opencode/schema/session-id"
-import { makeGlobalNode } from "@opencode/util/effect/app-node"
+import { LayerNode } from "@opencode/util/effect/layer-node"
+import { Node, makeGlobalNode } from "@opencode/util/effect/app-node"
 import { KV } from "./kv.js"
 import { LoopState } from "./loop/state.js"
 import { LoopStore } from "./loop/store.js"
@@ -93,4 +94,11 @@ export const layer = Layer.effect(
   }),
 )
 
-export const node = makeGlobalNode({ service: Service, layer, deps: [KV.node] })
+// The explicit Provider annotation is what lets the plugin host list this service
+// in its Requirements; without it `makeGlobalNode` infers a shape the host cannot
+// see, and every plugin that yields Loop.Service fails to typecheck.
+export const node: LayerNode.Provider<Service, never, typeof Node.tags.values.global> = makeGlobalNode({
+  service: Service,
+  layer,
+  deps: [KV.node],
+})

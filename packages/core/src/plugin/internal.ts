@@ -64,6 +64,7 @@ import { Reference } from "../reference.js"
 import { WebSearch } from "../websearch.js"
 import { Ripgrep } from "../ripgrep.js"
 import { Automation } from "../automation.js"
+import { Loop } from "../loop.js"
 import { Session } from "../session.js"
 import { SessionCompaction } from "../session/compaction.js"
 import { SessionInstructions } from "../session/instructions.js"
@@ -88,6 +89,7 @@ import { ReadToolFileSystem } from "../tool/read-filesystem.js"
 import { ReadTool } from "../tool/plugin/read.js"
 import { ArtifactTools } from "../tool/plugin/artifact.js"
 import { AutomationTools } from "../tool/plugin/automation.js"
+import { LoopTools } from "../tool/plugin/loop.js"
 import { ShellTool } from "../tool/plugin/shell.js"
 import { SkillTool } from "../tool/plugin/skill.js"
 import { SubagentTool } from "../tool/plugin/subagent.js"
@@ -162,6 +164,7 @@ const services = [
   WebSearch.Service,
   Ripgrep.Service,
   Automation.Service,
+  Loop.Service,
   Session.Service,
   SessionCompaction.Service,
   SessionInstructions.Service,
@@ -224,6 +227,7 @@ export const requirements = LayerNode.group([
   WebSearch.node,
   Ripgrep.node,
   Automation.node,
+  Loop.node,
   Session.node,
   SessionCompaction.node,
   SessionInstructions.node,
@@ -277,6 +281,7 @@ const pre = [
   ReadTool.Plugin,
   ArtifactTools.Plugin,
   AutomationTools.Plugin,
+  LoopTools.Plugin,
   ShellTool.Plugin,
   SkillTool.Plugin,
   SubagentTool.Plugin,

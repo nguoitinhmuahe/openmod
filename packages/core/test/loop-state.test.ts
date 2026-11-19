@@ -2,6 +2,9 @@ import { describe, expect, test } from "bun:test"
 import { MAX_ITERATIONS, NO_PROGRESS_LIMIT, afterIdle, end, start } from "@opencode/core/loop/state"
 import type { Request } from "@opencode/core/loop/parse"
 
+// Clock is a Context.Reference with a default in Effect 4.1, so a service that
+// reads it needs no Clock layer in tests. KV is different: a test that both
+// provides it to a layer and reads it itself needs `provideMerge`, not `provide`.
 const started = (request: Extract<Request, { kind: "start" }>) => start({ sessionID: "ses_one", request, now: 1_000 })
 const interval = started({ kind: "start", mode: "interval", intervalMs: 300_000, instruction: "check" })
 const untilDone = started({ kind: "start", mode: "until-done", instruction: "fix" })

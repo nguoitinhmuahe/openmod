@@ -17,6 +17,11 @@ export interface Interface {
   }) => Effect.Effect<LoopState.Record>
   readonly status: (sessionID: SessionID) => Effect.Effect<LoopState.Record | undefined>
   /**
+   * Every stored loop, so a driver can pick up loops that outlived a restart
+   * rather than only the ones started in this process.
+   */
+  readonly list: () => Effect.Effect<LoopState.Record[]>
+  /**
    * Persists a record the caller already transitioned.
    *
    * `afterIdle` is pure and returns the next record; the driver is what writes it
@@ -57,6 +62,13 @@ export const layer = Layer.effect(
       }),
       status: Effect.fn("Loop.status")(function* (sessionID) {
         return yield* read(sessionID)
+      }),
+      list: Effect.fn("Loop.list")(function* () {
+        const scanned = yield* kv.scan({ prefix: "loop:" })
+        return scanned.entries.flatMap((entry) => {
+          const record = LoopStore.decode(entry.value)
+          return record === undefined ? [] : [record]
+        })
       }),
       put: Effect.fn("Loop.put")(function* (record) {
         yield* write(record)

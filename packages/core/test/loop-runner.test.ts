@@ -1,5 +1,5 @@
 import { expect } from "bun:test"
-import { Effect, Fiber, Ref } from "effect"
+import { Deferred, Effect, Fiber, Ref } from "effect"
 import { Bus } from "@opencode/core/bus"
 import { KV } from "@opencode/core/kv"
 import { Loop } from "@opencode/core/loop"
@@ -26,6 +26,9 @@ const withLoop = testEffect(LayerNode.compile(LayerNode.group([Bus.node, KV.node
  */
 const countingSession = Effect.gen(function* () {
   const sent = yield* Ref.make<string[]>([])
+  // Busy until the test finishes the run, so a test can place the end of a run at a
+  // chosen moment. The interval is measured from there, which is what these check.
+  const gate = yield* Ref.make(yield* Deferred.make<void>())
   const service: SessionPort = {
     prompt: (input) => Ref.update(sent, (all) => [...all, input.text]),
     messages: () =>
@@ -36,11 +39,19 @@ const countingSession = Effect.gen(function* () {
             : ([{ type: "assistant", content: [{ type: "tool", name: "bash", id: "t", state: {} }] }] as never),
         ),
       ),
-    // Reports the session as idle immediately: these tests are about dispatch timing,
-    // and the run they describe has no work left to wait for.
-    wait: () => Effect.void,
+    wait: () => Ref.get(gate).pipe(Effect.flatMap((d) => Deferred.await(d))),
   }
-  return { service, sent }
+  return {
+    service,
+    sent,
+    /** Marks the current run finished and arms the next wait. */
+    finish: () =>
+      Ref.get(gate).pipe(
+        Effect.flatMap((d) => Deferred.succeed(d, undefined)),
+        Effect.andThen(Deferred.make<void>()),
+        Effect.flatMap((next) => Ref.set(gate, next)),
+      ),
+  }
 })
 
 /** Lets queued work run to its next suspension point without real time passing. */
@@ -95,16 +106,18 @@ withLoop.effect("an until-done loop starts the next run as soon as one finishes"
     yield* loop.start({ sessionID, request: { kind: "start", mode: "until-done", instruction: "fix" } })
     yield* drive({ loop, sessions: counting.service, bus }).pipe(Effect.forkScoped)
     yield* settle
-    // The stub reports the session idle at once, so the driver runs several iterations
-    // without any event. That is the contract: a completed run starts the next, and an
-    // idle event is not what the loop waits on.
+    expect(yield* Ref.get(counting.sent)).toEqual(["fix"])
+
+    // The run ends, so the next starts with no clock involved.
+    yield* counting.finish()
+    yield* settle
     const dispatched = yield* Ref.get(counting.sent)
     expect(dispatched.length).toBeGreaterThan(1)
     expect(dispatched.every((text) => text === "fix")).toBe(true)
   }),
 )
 
-withLoop.effect("an interval loop waits out its interval before the next prompt", () =>
+withLoop.effect("an interval loop counts the interval from when the run ended", () =>
   Effect.gen(function* () {
     const loop = yield* Loop.Service
     const bus = yield* Bus.Service
@@ -117,12 +130,19 @@ withLoop.effect("an interval loop waits out its interval before the next prompt"
     yield* settle
     expect(yield* Ref.get(counting.sent)).toEqual(["check"])
 
-    yield* bus.publish(SessionStatusEvent.Status, { sessionID, status: { type: "idle" } })
+    // Let the run finish after five minutes of work. Measured from the dispatch, only
+    // five of the ten minutes would remain; measured from the finish, a full ten are
+    // still owed. The loop must count from the finish, so nothing goes out yet.
+    yield* TestClock.adjust("5 minutes")
+    yield* counting.finish()
     yield* settle
-    // Idle arrived immediately, but the interval has not elapsed, so nothing more is sent.
     expect(yield* Ref.get(counting.sent)).toEqual(["check"])
 
-    yield* TestClock.adjust("300 seconds")
+    yield* TestClock.adjust("299 seconds")
+    yield* settle
+    expect(yield* Ref.get(counting.sent)).toEqual(["check"])
+
+    yield* TestClock.adjust("1 second")
     yield* settle
     expect(yield* Ref.get(counting.sent)).toEqual(["check", "check"])
   }),

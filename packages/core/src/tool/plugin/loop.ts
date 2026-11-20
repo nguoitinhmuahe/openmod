@@ -67,7 +67,10 @@ export const Plugin = {
           "End this session's loop because the instruction has been carried out. Call it when the goal is met and there is nothing further to do; do not call it merely because a turn finished in interval mode.",
         input: CompleteInput,
         output: Result,
-        options: { namespace: "opencode", codemode: true },
+        // codemode: false so the model sees it outright. Behind `execute` it only appears
+        // after a search, and a real run spent its whole turn searching for it and never
+        // called it, so the loop ran again.
+        options: { namespace: "opencode", codemode: false },
         execute: (input, context) =>
           Effect.gen(function* () {
             const found = yield* current(loop, context.sessionID)
@@ -93,7 +96,7 @@ export const Plugin = {
           "Pause this session's loop because it cannot continue without the user. Use it for a missing permission, a decision only the user can make, or attempts that stopped making progress. The loop resumes when the user replies.",
         input: BlockedInput,
         output: Result,
-        options: { namespace: "opencode", codemode: true },
+        options: { namespace: "opencode", codemode: false },
         execute: (input, context) =>
           Effect.gen(function* () {
             const found = yield* current(loop, context.sessionID)

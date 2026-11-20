@@ -8,7 +8,7 @@ import { Session } from "@opencode/core/session"
 import { LoopTools } from "@opencode/core/tool/plugin/loop"
 import { LayerNode } from "@opencode/util/effect/layer-node"
 import { testEffect } from "./lib/effect"
-import { registerToolPlugin, toolIdentity, toolNodeReplacements } from "./lib/tool"
+import { registerToolPlugin, toolDefinitions, toolIdentity, toolNodeReplacements } from "./lib/tool"
 
 const sessionID = Session.ID.make("ses_loop_tool_test")
 const loopLayer = Loop.layer.pipe(Layer.provide(LayerNode.compile(LayerNode.group([KV.node]))))
@@ -44,6 +44,20 @@ const register = () =>
   })
 
 describe("loop tools", () => {
+  it.effect("both tools are visible to the model without a search", () =>
+    Effect.gen(function* () {
+      yield* register()
+      // A codemode tool lives behind `execute` and only appears when the model searches
+      // for it. A real session showed exactly that cost: the first run spent its whole
+      // turn looking the tool up and never called it, so the loop ran again. These two
+      // are how a loop ends, so the model must see them outright.
+      const names = (yield* toolDefinitions(yield* Tool.Service)).map((tool) => tool.name)
+      expect(names).toContain("opencode_loop_complete")
+      expect(names).toContain("opencode_loop_blocked")
+      expect(names).not.toContain("opencode_loop")
+    }).pipe(Effect.provide(loopLayer)),
+  )
+
   it.effect("loop_complete ends the loop as completed and keeps the summary", () =>
     Effect.gen(function* () {
       const loop = yield* Loop.Service

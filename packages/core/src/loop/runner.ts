@@ -173,13 +173,10 @@ export function drive(input: { loop: LoopPort; sessions: SessionPort; bus: Bus.I
         const record = yield* input.loop.status(sessionID)
         if (record === undefined || record.state === "ended" || record.state === "paused") return
 
-        // The clock, not Date.now: tests drive this with TestClock, and a wall-clock
-        // read here would make every interval test sit for real seconds.
-        const startedAt = yield* Clock.currentTimeMillis
-        // Stamp before dispatch, and carry the stamped record into afterIdle: the
-        // interval remainder is measured from when this run started, so passing the
-        // unstamped record would always compute a full interval of remaining wait.
-        const dispatched = { ...record, lastRunAt: startedAt }
+        // Stamp the iteration, not the clock. `lastRunAt` is written when the run ends,
+        // so the interval counts from the reply — that is what "loop 30s" means, and
+        // stamping here instead would make a slow run eat its own wait.
+        const dispatched = { ...record, iteration: record.iteration }
         yield* input.loop.put(dispatched)
         // Snapshot before the run, so the messages it adds can be told apart from
         // the history that was already there.

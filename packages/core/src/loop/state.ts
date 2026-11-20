@@ -77,28 +77,44 @@ export function afterIdle(
 
   if (input.progressed) {
     if (record.mode === "interval") {
-      const elapsed = input.now - (record.lastRunAt ?? input.now)
-      const remaining = (record.intervalMs ?? 0) - elapsed
+      const remaining = due(record, input.now)
       if (remaining > 0)
         return {
-          record: { ...record, noProgress: 0, state: "waiting" },
+          record: { ...record, lastRunAt: input.now, noProgress: 0, state: "waiting" },
           action: "wait",
           waitMs: remaining,
         }
     }
-    return { record: next(record, 0), action: "prompt" }
+    return { record: { ...next(record, 0), lastRunAt: input.now }, action: "prompt" }
   }
 
   const noProgress = record.noProgress + 1
   if (noProgress >= NO_PROGRESS_LIMIT) return { record: end(record, "no-progress"), action: "end" }
 
   if (record.mode === "interval") {
-    const elapsed = input.now - (record.lastRunAt ?? input.now)
-    const remaining = (record.intervalMs ?? 0) - elapsed
-    if (remaining > 0) return { record: { ...record, noProgress, state: "waiting" }, action: "wait", waitMs: remaining }
+    const remaining = due(record, input.now)
+    if (remaining > 0)
+      return {
+        record: { ...record, lastRunAt: input.now, noProgress, state: "waiting" },
+        action: "wait",
+        waitMs: remaining,
+      }
   }
 
-  return { record: next(record, noProgress), action: "prompt" }
+  return { record: { ...next(record, noProgress), lastRunAt: input.now }, action: "prompt" }
+}
+
+/**
+ * due is how long the loop still owes before its next run.
+ *
+ * Counted from when the previous run **ended**, not when it was dispatched: a
+ * `30s` loop means "wait 30s after the reply, then send the instruction again", so
+ * a run that took ten seconds still owes the full thirty. `lastRunAt` is stamped
+ * at the end of each run for that reason, and reading it back after a restart
+ * keeps the same meaning.
+ */
+function due(record: Record, now: number): number {
+  return (record.lastRunAt ?? now) + (record.intervalMs ?? 0) - now
 }
 
 /** Advances to the next run, leaving the interval clock to the caller. */

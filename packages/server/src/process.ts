@@ -122,11 +122,18 @@ export const start = Effect.fn("ServerProcess.start")(function* <E, R>(
     // Loops are driven the same way, for the same reason: their state is in the
     // database, so a restarted process picks up a loop that outlived it. Without
     // this fork /loop would store a record that nothing ever acts on.
+    //
+    // Bus is provided explicitly. `serve` needs it, and `forkIn` does not carry the
+    // route layer's environment into the forked fiber — reading it from the ambient
+    // environment instead killed the fiber at once, silently, which is why a loop
+    // could be stored and never dispatched.
     yield* Effect.forkIn(
-      Context.get(context, Loop.Service).serve({
-        prompt: (input) => Context.get(context, Session.Service).prompt(input).pipe(Effect.asVoid),
-        messages: (sessionID) => Context.get(context, Session.Service).messages({ sessionID }),
-      }),
+      Context.get(context, Loop.Service)
+        .serve({
+          prompt: (input) => Context.get(context, Session.Service).prompt(input).pipe(Effect.asVoid),
+          messages: (sessionID) => Context.get(context, Session.Service).messages({ sessionID }),
+        })
+        .pipe(Effect.provideService(Bus.Service, Context.get(context, Bus.Service))),
       applicationScope,
     )
     yield* Ref.set(application, Option.some(Context.get(context, HttpRouter.HttpRouter).asHttpEffect()))

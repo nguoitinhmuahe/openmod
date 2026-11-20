@@ -113,9 +113,10 @@ export const layer = Layer.effect(
       // the only thing a caller has to supply.
       serve: (sessions) =>
         Effect.gen(function* () {
+          yield* Effect.logInfo("loop driver starting")
           const bus = yield* Bus.Service
           return yield* LoopRunner.drive({ loop: service, sessions, bus })
-        }),
+        }).pipe(Effect.tapCause((cause) => Effect.logError("loop driver failed", { cause }))),
     })
   }),
 )

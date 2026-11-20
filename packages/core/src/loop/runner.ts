@@ -183,5 +183,14 @@ export function drive(input: { loop: LoopPort; sessions: SessionPort; bus: Bus.I
 
     // Hold the scope open so the drivers keep running until the caller interrupts.
     yield* Effect.never
-  }).pipe(Effect.orDie, Effect.scoped)
+  }).pipe(
+    // A defect here used to vanish: `orDie` killed the fiber with no log, so a loop
+    // that never dispatched looked identical to a loop that was never stored. The
+    // log is what turns that silence into a diagnosis.
+    Effect.catchCause((cause) =>
+      Effect.logError("loop driver stopped", { cause }).pipe(Effect.andThen(Effect.failCause(cause))),
+    ),
+    Effect.orDie,
+    Effect.scoped,
+  )
 }

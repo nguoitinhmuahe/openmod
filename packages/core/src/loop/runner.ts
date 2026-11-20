@@ -39,6 +39,14 @@ export type SessionPort = {
    * `progressed` can tell a run that acted from one that only talked.
    */
   readonly messages: (sessionID: SessionID) => Effect.Effect<readonly SessionMessage.Info[], unknown>
+  /**
+   * Resolves when the session has no work left.
+   *
+   * Preferred over listening for an idle event: a run that finishes before the
+   * driver subscribes publishes its idle with nobody listening, and the loop then
+   * waits forever. This reports the state rather than the edge, so it cannot miss.
+   */
+  readonly wait: (sessionID: SessionID) => Effect.Effect<void, unknown>
 }
 
 /**
@@ -118,13 +126,13 @@ export type LoopPort = Pick<Loop.Interface, "status" | "put" | "list">
 export function drive(input: { loop: LoopPort; sessions: SessionPort; bus: Bus.Interface }) {
   const run = (sessionID: SessionID) =>
     Effect.gen(function* () {
-      // One subscription for the session's whole life: an idle published between
-      // runs is buffered rather than missed, which is what would otherwise stall
-      // the loop after its first dispatch.
+      // The subscription stays as a backstop for a session that is still running, but
+      // it is no longer what the driver waits on. An idle event is an edge: a run that
+      // finishes before this fiber subscribes publishes it with nobody listening, and
+      // the loop then waits forever — which is exactly what happened, a loop that ran
+      // its first turn and stopped. `sessions.wait` reports the state instead, so a
+      // run that is already over still lets the next iteration start.
       const waitForIdle = yield* idleWaiter(input.bus, sessionID)
-        // Let the subscription fiber register before the first run is dispatched, or an
-        // idle that arrives immediately after would be published with nobody listening.
-        .pipe(Effect.tap(() => Effect.yieldNow))
       while (true) {
         const record = yield* input.loop.status(sessionID)
         if (record === undefined || record.state === "ended" || record.state === "paused") return
@@ -142,7 +150,9 @@ export function drive(input: { loop: LoopPort; sessions: SessionPort; bus: Bus.I
         const before = yield* input.sessions.messages(sessionID)
         yield* input.sessions.prompt({ sessionID, text: record.instruction, delivery: "queue" })
 
-        yield* waitForIdle()
+        // Wait for the run to finish. Raced against the idle event so whichever
+        // arrives first releases the driver, and neither alone can hang it.
+        yield* Effect.raceFirst(input.sessions.wait(sessionID), waitForIdle().pipe(Effect.timeoutOption("10 minutes")))
 
         // A run that only wrote prose is not progress, and two of those in a row end
         // the loop rather than letting it spend its whole budget talking.

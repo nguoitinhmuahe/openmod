@@ -1,5 +1,5 @@
 import { expect, describe } from "bun:test"
-import { Effect, Ref } from "effect"
+import { Deferred, Effect, Ref } from "effect"
 import { TestClock } from "effect/testing"
 import { Bus } from "@opencode/core/bus"
 import { KV } from "@opencode/core/kv"
@@ -16,14 +16,20 @@ const it = testEffect(LayerNode.compile(LayerNode.group([Bus.node, KV.node, Loop
 const sessionStub = Effect.gen(function* () {
   const prompts = yield* Ref.make<string[]>([])
   const notices = yield* Ref.make<string[]>([])
+  const release = yield* Deferred.make<void>()
   return {
     port: {
       prompt: (input: { text: string }) => Ref.update(prompts, (all) => [...all, input.text]),
       messages: () => Effect.succeed([{ type: "assistant", content: [{ type: "tool", name: "bash" }] }] as never),
       notify: (input: { text: string }) => Ref.update(notices, (all) => [...all, input.text]),
+      // Blocks until the test releases it, standing in for a session that is busy.
+      // A stub that resolved at once would let the driver spin through its whole
+      // budget before the test could look, which is not what a real session does.
+      wait: () => Deferred.await(release.pipe(Effect.orDie)),
     },
     prompts,
     notices,
+    release,
   }
 })
 

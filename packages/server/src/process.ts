@@ -132,6 +132,12 @@ export const start = Effect.fn("ServerProcess.start")(function* <E, R>(
         .serve({
           prompt: (input) => Context.get(context, Session.Service).prompt(input).pipe(Effect.asVoid),
           messages: (sessionID) => Context.get(context, Session.Service).messages({ sessionID }),
+          // Reports that the session has no work left, rather than an idle event that
+          // may have been published before the driver subscribed.
+          wait: (sessionID) =>
+            Context.get(context, Session.Service)
+              .wait(sessionID)
+              .pipe(Effect.catchTag("Session.NotFoundError", () => Effect.void)),
         })
         .pipe(Effect.provideService(Bus.Service, Context.get(context, Bus.Service))),
       applicationScope,

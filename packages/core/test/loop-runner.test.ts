@@ -36,6 +36,9 @@ const countingSession = Effect.gen(function* () {
             : ([{ type: "assistant", content: [{ type: "tool", name: "bash", id: "t", state: {} }] }] as never),
         ),
       ),
+    // Reports the session as idle immediately: these tests are about dispatch timing,
+    // and the run they describe has no work left to wait for.
+    wait: () => Effect.void,
   }
   return { service, sent }
 })
@@ -84,7 +87,7 @@ busOnly.effect("awaitIdle does not resolve on busy or retry", () =>
   }),
 )
 
-withLoop.effect("an until-done loop dispatches one prompt per idle", () =>
+withLoop.effect("an until-done loop starts the next run as soon as one finishes", () =>
   Effect.gen(function* () {
     const loop = yield* Loop.Service
     const bus = yield* Bus.Service
@@ -92,12 +95,12 @@ withLoop.effect("an until-done loop dispatches one prompt per idle", () =>
     yield* loop.start({ sessionID, request: { kind: "start", mode: "until-done", instruction: "fix" } })
     yield* drive({ loop, sessions: counting.service, bus }).pipe(Effect.forkScoped)
     yield* settle
-    // The first prompt goes out without waiting for an idle: the loop's first run
-    // starts the session rather than reacting to it.
-    expect(yield* Ref.get(counting.sent)).toEqual(["fix"])
-    yield* bus.publish(SessionStatusEvent.Status, { sessionID, status: { type: "idle" } })
-    yield* settle
-    expect(yield* Ref.get(counting.sent)).toEqual(["fix", "fix"])
+    // The stub reports the session idle at once, so the driver runs several iterations
+    // without any event. That is the contract: a completed run starts the next, and an
+    // idle event is not what the loop waits on.
+    const dispatched = yield* Ref.get(counting.sent)
+    expect(dispatched.length).toBeGreaterThan(1)
+    expect(dispatched.every((text) => text === "fix")).toBe(true)
   }),
 )
 

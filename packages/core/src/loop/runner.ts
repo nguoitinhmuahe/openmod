@@ -10,6 +10,18 @@ import { LoopProgress } from "./progress.js"
 import { LoopState } from "./state.js"
 
 /**
+ * How often the driver re-reads the store for new loops.
+ *
+ * A one-shot read at boot is the bug this replaces: a driver that only looks at
+ * startup never sees a loop the user starts later, so `/loop` stored a record
+ * nothing ran and the session received only the command's confirmation.
+ *
+ * The store read is a single indexed get, so a short tick is cheap; a quarter
+ * second is below what a user notices between typing `/loop` and the first run.
+ */
+const SWEEP_INTERVAL_MS = 250
+
+/**
  * The slice of the session service the driver actually uses.
  *
  * It is deliberately this small: it is what a test can stub, and the real
@@ -150,11 +162,25 @@ export function drive(input: { loop: LoopPort; sessions: SessionPort; bus: Bus.I
     // FiberMap scopes each driver: one fiber per session, so a second drive call for
     // the same session cannot produce a second loop prompting the same conversation.
     const drivers = yield* FiberMap.make<SessionID>()
-    for (const record of yield* input.loop.list()) {
-      const id = record.sessionID as SessionID
-      if (record.state === "ended" || record.state === "paused") continue
-      yield* FiberMap.run(drivers, id, run(id))
-    }
+
+    const attach = (sessionID: SessionID) =>
+      Effect.gen(function* () {
+        if (yield* FiberMap.has(drivers, sessionID)) return
+        const record = yield* input.loop.status(sessionID)
+        if (record === undefined || record.state === "ended" || record.state === "paused") return
+        yield* FiberMap.run(drivers, sessionID, run(sessionID))
+      })
+
+    // Sweep once at boot for loops that outlived the process, then keep sweeping so
+    // a loop started later is picked up too.
+    for (const record of yield* input.loop.list()) yield* attach(record.sessionID as SessionID)
+    yield* Effect.gen(function* () {
+      while (true) {
+        yield* Effect.sleep(SWEEP_INTERVAL_MS)
+        for (const record of yield* input.loop.list()) yield* attach(record.sessionID as SessionID)
+      }
+    }).pipe(Effect.forkScoped)
+
     // Hold the scope open so the drivers keep running until the caller interrupts.
     yield* Effect.never
   }).pipe(Effect.orDie, Effect.scoped)

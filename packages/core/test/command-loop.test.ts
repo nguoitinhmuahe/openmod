@@ -25,8 +25,10 @@ const it = testEffect(AppNodeBuilder.build(Tool.node, toolNodeReplacements()))
  * The invocation carries only the arguments: the TUI strips the command word
  * before it calls the server, so `text` here is what followed `/loop `.
  *
- * `session.prompt` is stubbed to record replies, because the command answers the
- * user through the session — the same way automation's command does.
+ * Replies are collected from `synthetic`, and `prompt` is a trap that fails the
+ * test if it is called. A command's answer must never reach the model: `prompt` is
+ * input to it, so a status line sent that way becomes the model's instruction —
+ * which is the bug this pins.
  */
 const withCommands = <A, E, R>(use: (commands: CommandDefinition[], replies: string[]) => Effect.Effect<A, E, R>) =>
   Effect.gen(function* () {
@@ -40,10 +42,14 @@ const withCommands = <A, E, R>(use: (commands: CommandDefinition[], replies: str
         transform: (callback) => Effect.sync(() => callback({ add: (definition) => commands.push(definition) })),
       },
       session: {
-        prompt: ((input: { text: string }) =>
+        synthetic: ((input: { text: string }) =>
           Effect.sync(() => {
             replies.push(input.text)
           })) as never,
+        prompt: (() =>
+          Effect.die(
+            "the /loop command must not prompt the model — a reply sent through prompt becomes the model's instruction",
+          )) as never,
       },
     })
     return yield* use(commands, replies)

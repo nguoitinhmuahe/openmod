@@ -175,6 +175,13 @@ function formatInterval(ms: number): string {
   return `${Math.round(ms / 1000)}s`
 }
 
-/** Sends the command's one-line answer back into the session, where the user sees it. */
+/**
+ * Shows the command's one-line answer to the user.
+ *
+ * `synthetic` with `resume: false`, never `prompt`: a prompt is input to the model,
+ * so a status line sent that way becomes the model's instruction. That is exactly
+ * what happened before — the session received only "Loop started: until it is done
+ * or blocked." and the model went looking for a task it was never given.
+ */
 const reply = (ctx: Context, sessionID: Parameters<Loop.Interface["status"]>[0], text: string) =>
-  ctx.session.prompt({ sessionID, text, delivery: "queue" }).pipe(Effect.asVoid)
+  ctx.session.synthetic({ sessionID, text, resume: false }).pipe(Effect.asVoid)

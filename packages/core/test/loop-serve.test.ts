@@ -104,6 +104,33 @@ describe("Loop.serve", () => {
     }),
   )
 
+  it.effect("a loop the model completes mid-run stays ended", () =>
+    Effect.gen(function* () {
+      const loop = yield* Loop.Service
+      const stub = yield* sessionStub
+      yield* loop.start({ sessionID, request: { kind: "start", mode: "until-done", instruction: "write the file" } })
+
+      // The model calls loop_complete partway through the run, which is how the tool is
+      // actually used: it fires while the driver is still waiting.
+      yield* loop.serve(stub.port).pipe(Effect.forkScoped)
+      yield* Effect.yieldNow
+      yield* Effect.yieldNow
+      expect(yield* Ref.get(stub.prompts)).toEqual(["write the file"])
+
+      yield* loop.stop(sessionID, "completed", "wrote the file")
+      yield* stub.finish()
+      yield* Effect.yieldNow
+      yield* Effect.yieldNow
+      yield* Effect.yieldNow
+
+      // The driver must not write its own pre-completion record back over the ending.
+      // That overwrite is what let a completed loop come back to life and re-send.
+      expect((yield* loop.status(sessionID))?.state).toBe("ended")
+      expect((yield* loop.status(sessionID))?.endReason).toBe("completed")
+      expect(yield* Ref.get(stub.prompts)).toEqual(["write the file"])
+    }),
+  )
+
   it.effect("stops driving a loop the user stopped", () =>
     Effect.gen(function* () {
       const loop = yield* Loop.Service

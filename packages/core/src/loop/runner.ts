@@ -197,18 +197,36 @@ export function drive(input: { loop: LoopPort; sessions: SessionPort; bus: Bus.I
         // A run the user cut short is over, not complete. Without this check Esc looked
         // exactly like a finished turn, so every interruption sent the instruction
         // again and the loop became a spammer the user could not stop by interrupting.
-        if (outcome === "interrupted") {
-          yield* input.loop.put(LoopState.end(dispatched, "interrupted"))
+        // Read the store first: the model may have ended the loop during this run by
+        // calling loop_complete, and that ending must win.
+        const latest = yield* input.loop.status(sessionID)
+        if (
+          outcome === "interrupted" ||
+          latest === undefined ||
+          latest.state === "ended" ||
+          latest.state === "paused"
+        ) {
+          if (outcome === "interrupted" && latest?.state !== "ended" && latest?.state !== "paused")
+            yield* input.loop.put(LoopState.end(latest ?? dispatched, "interrupted"))
           return
         }
 
         // A run that only wrote prose is not progress, and two of those in a row end
         // the loop rather than letting it spend its whole budget talking.
+        //
+        // The decision builds on `latest`, never on `dispatched`. Writing a record
+        // derived from the pre-run copy is what let a completed loop come back: the
+        // model's loop_complete was stored, then overwritten by this driver's own
+        // stale view, and the same instruction went out again — eight times in one
+        // real session.
         const after = yield* input.sessions.messages(sessionID)
-        const decision = LoopState.afterIdle(dispatched, {
-          now: yield* Clock.currentTimeMillis,
-          progressed: LoopProgress.progressed(before, after),
-        })
+        const decision = LoopState.afterIdle(
+          { ...latest, iteration: dispatched.iteration },
+          {
+            now: yield* Clock.currentTimeMillis,
+            progressed: LoopProgress.progressed(before, after),
+          },
+        )
         yield* input.loop.put(decision.record)
         if (decision.action === "end") return
         if (decision.action === "wait" && decision.waitMs !== undefined && decision.waitMs > 0)

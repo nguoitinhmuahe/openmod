@@ -93,7 +93,17 @@ export function awaitIdle(bus: Bus.Interface, sessionID: string): Effect.Effect<
  * Without step 3 an interval loop would compute a wait and throw it away, which is
  * the difference between a loop that repeats and one that runs once.
  */
-export function drive(input: { loop: Loop.Interface; sessions: SessionPort; bus: Bus.Interface }) {
+/**
+ * The loop methods the driver uses.
+ *
+ * Declared structurally rather than as `Loop.Interface`: the service builds its
+ * interface and then attaches `serve`, which calls this function, so the driver
+ * cannot reference `Interface` without a cycle. It also keeps a test able to pass
+ * a hand-built loop.
+ */
+export type LoopPort = Pick<Loop.Interface, "status" | "put" | "list">
+
+export function drive(input: { loop: LoopPort; sessions: SessionPort; bus: Bus.Interface }) {
   const run = (sessionID: SessionID) =>
     Effect.gen(function* () {
       // One subscription for the session's whole life: an idle published between

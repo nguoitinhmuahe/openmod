@@ -4,6 +4,8 @@ import { NodeHttpServer } from "@effect/platform-node"
 import { Bus } from "@opencode/core/bus"
 import { SessionRestart } from "@opencode/core/session/execution/restart"
 import { Automation } from "@opencode/core/automation"
+import { Loop } from "@opencode/core/loop"
+import { Session } from "@opencode/core/session"
 import { InstallationEvent } from "@opencode/schema/installation-event"
 import { hasPtyConnectTicketURL } from "@opencode/protocol/groups/pty"
 import { hasPersistentPtyConnectTicketURL } from "@opencode/protocol/groups/persistent-pty"
@@ -117,6 +119,16 @@ export const start = Effect.fn("ServerProcess.start")(function* <E, R>(
     }
     // Automations run from any server process (`service`, `opencode serve`, or `--standalone`); the table holds all their state.
     yield* Effect.forkIn(Context.get(context, Automation.Service).run, applicationScope)
+    // Loops are driven the same way, for the same reason: their state is in the
+    // database, so a restarted process picks up a loop that outlived it. Without
+    // this fork /loop would store a record that nothing ever acts on.
+    yield* Effect.forkIn(
+      Context.get(context, Loop.Service).serve({
+        prompt: (input) => Context.get(context, Session.Service).prompt(input).pipe(Effect.asVoid),
+        messages: (sessionID) => Context.get(context, Session.Service).messages({ sessionID }),
+      }),
+      applicationScope,
+    )
     yield* Ref.set(application, Option.some(Context.get(context, HttpRouter.HttpRouter).asHttpEffect()))
     yield* status.ready
     const bus = Context.get(context, Bus.Service)

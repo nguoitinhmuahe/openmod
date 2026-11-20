@@ -1,10 +1,12 @@
 export * as Loop from "./loop.js"
 
-import { Clock, Context, Effect, Layer } from "effect"
+import { Clock, Context, Effect, Layer, Scope } from "effect"
 import type { SessionID } from "@opencode/schema/session-id"
 import { LayerNode } from "@opencode/util/effect/layer-node"
 import { Node, makeGlobalNode } from "@opencode/util/effect/app-node"
+import { Bus } from "./bus.js"
 import { KV } from "./kv.js"
+import { LoopRunner } from "./loop/runner.js"
 import { LoopState } from "./loop/state.js"
 import { LoopStore } from "./loop/store.js"
 import type { Request } from "./loop/parse.js"
@@ -37,6 +39,17 @@ export interface Interface {
   ) => Effect.Effect<LoopState.Record | undefined>
   /** Clears a paused loop's ending so the driver picks it up again where it stopped. */
   readonly resume: (sessionID: SessionID) => Effect.Effect<LoopState.Record | undefined>
+  /**
+   * Starts driving every stored loop, and keeps driving them until interrupted.
+   *
+   * This is the entry point the process forks at boot, the same way it forks
+   * `Automation.Service.run`. Without it `/loop` would write a record nothing acts
+   * on: the state machine would be correct and never run.
+   *
+   * It takes the session port rather than reading `Session.Service` itself, so the
+   * service stays free of the session graph and a test can stub the port.
+   */
+  readonly serve: (sessions: LoopRunner.SessionPort) => Effect.Effect<void, never, Bus.Service | Scope.Scope>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/Loop") {}
@@ -51,7 +64,9 @@ export const layer = Layer.effect(
 
     const write = (record: LoopState.Record) => kv.set(LoopStore.keyFor(record.sessionID), LoopStore.encode(record))
 
-    return Service.of({
+    // Built before `serve`, because `serve` needs the finished interface to hand the
+    // driver — taking it from the context inside the same layer would be circular.
+    const service: Omit<Interface, "serve"> = {
       start: Effect.fn("Loop.start")(function* (input) {
         const record = LoopState.start({
           sessionID: input.sessionID,
@@ -90,6 +105,17 @@ export const layer = Layer.effect(
         yield* write(resumed)
         return resumed
       }),
+    }
+
+    return Service.of({
+      ...service,
+      // Bus is read here rather than in the interface build above, so the port stays
+      // the only thing a caller has to supply.
+      serve: (sessions) =>
+        Effect.gen(function* () {
+          const bus = yield* Bus.Service
+          return yield* LoopRunner.drive({ loop: service, sessions, bus })
+        }),
     })
   }),
 )

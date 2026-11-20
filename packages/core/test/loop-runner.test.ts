@@ -17,11 +17,25 @@ const sessionID = Session.ID.make("ses_runner_test")
 const busOnly = testEffect(LayerNode.compile(LayerNode.group([Bus.node])))
 const withLoop = testEffect(LayerNode.compile(LayerNode.group([Bus.node, KV.node, Loop.node])))
 
-/** Counts prompts and records what was dispatched, standing in for the session runner. */
+/**
+ * Counts prompts and stands in for the session runner.
+ *
+ * `messages` reports one tool call after the first prompt, so a run counts as
+ * progress and the loop keeps cycling — these tests are about the driver's
+ * timing, not the no-progress rule, which loop-progress.test.ts covers.
+ */
 const countingSession = Effect.gen(function* () {
   const sent = yield* Ref.make<string[]>([])
   const service: SessionPort = {
     prompt: (input) => Ref.update(sent, (all) => [...all, input.text]),
+    messages: () =>
+      Ref.get(sent).pipe(
+        Effect.map((all) =>
+          all.length === 0
+            ? []
+            : ([{ type: "assistant", content: [{ type: "tool", name: "bash", id: "t", state: {} }] }] as never),
+        ),
+      ),
   }
   return { service, sent }
 })

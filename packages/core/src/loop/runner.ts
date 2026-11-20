@@ -5,6 +5,8 @@ import type { SessionID } from "@opencode/schema/session-id"
 import { SessionStatusEvent } from "@opencode/schema/session-status-event"
 import type { Bus } from "../bus.js"
 import type { Loop } from "../loop.js"
+import type { SessionMessage } from "../session/message.js"
+import { LoopProgress } from "./progress.js"
 import { LoopState } from "./state.js"
 
 /**
@@ -20,6 +22,11 @@ export type SessionPort = {
     text: string
     delivery: "steer" | "queue"
   }) => Effect.Effect<void, unknown>
+  /**
+   * The session's messages. The driver snapshots them around each run so
+   * `progressed` can tell a run that acted from one that only talked.
+   */
+  readonly messages: (sessionID: SessionID) => Effect.Effect<readonly SessionMessage.Info[], unknown>
 }
 
 /**
@@ -108,11 +115,20 @@ export function drive(input: { loop: Loop.Interface; sessions: SessionPort; bus:
         // unstamped record would always compute a full interval of remaining wait.
         const dispatched = { ...record, lastRunAt: startedAt }
         yield* input.loop.put(dispatched)
+        // Snapshot before the run, so the messages it adds can be told apart from
+        // the history that was already there.
+        const before = yield* input.sessions.messages(sessionID)
         yield* input.sessions.prompt({ sessionID, text: record.instruction, delivery: "queue" })
 
         yield* waitForIdle()
 
-        const decision = LoopState.afterIdle(dispatched, { now: yield* Clock.currentTimeMillis, progressed: true })
+        // A run that only wrote prose is not progress, and two of those in a row end
+        // the loop rather than letting it spend its whole budget talking.
+        const after = yield* input.sessions.messages(sessionID)
+        const decision = LoopState.afterIdle(dispatched, {
+          now: yield* Clock.currentTimeMillis,
+          progressed: LoopProgress.progressed(before, after),
+        })
         yield* input.loop.put(decision.record)
         if (decision.action === "end") return
         if (decision.action === "wait" && decision.waitMs !== undefined && decision.waitMs > 0)

@@ -54,7 +54,15 @@ export function decode(raw: unknown): LoopRecord | undefined {
   if (note !== undefined && typeof note !== "string") return undefined
 
   const endReason = value.endReason
-  const reasons = ["completed", "blocked", "stopped", "max-iterations", "max-wall-clock", "no-progress"] as const
+  const reasons = [
+    "completed",
+    "blocked",
+    "stopped",
+    "interrupted",
+    "max-iterations",
+    "max-wall-clock",
+    "no-progress",
+  ] as const
   if (endReason !== undefined && !reasons.includes(endReason as (typeof reasons)[number])) return undefined
 
   return {

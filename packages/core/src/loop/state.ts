@@ -15,7 +15,14 @@ export const NO_PROGRESS_LIMIT = 2
 
 export type Mode = "interval" | "until-done"
 
-export type EndReason = "completed" | "blocked" | "stopped" | "max-iterations" | "max-wall-clock" | "no-progress"
+export type EndReason =
+  | "completed"
+  | "blocked"
+  | "stopped"
+  | "interrupted"
+  | "max-iterations"
+  | "max-wall-clock"
+  | "no-progress"
 
 export type Record = {
   readonly sessionID: string

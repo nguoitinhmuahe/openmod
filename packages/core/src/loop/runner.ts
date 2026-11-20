@@ -2,6 +2,7 @@ export * as LoopRunner from "./runner.js"
 
 import { Clock, Effect, FiberMap, Queue, Scope, Stream } from "effect"
 import type { SessionID } from "@opencode/schema/session-id"
+import { SessionEvent } from "@opencode/schema/session-event"
 import { SessionStatusEvent } from "@opencode/schema/session-status-event"
 import type { Bus } from "../bus.js"
 import type { Loop } from "../loop.js"
@@ -97,6 +98,38 @@ export function awaitIdle(bus: Bus.Interface, sessionID: string): Effect.Effect<
 }
 
 /**
+ * interruptWaiter reports that the user cut a run short.
+ *
+ * Esc is an interruption, not a finished turn, and the difference matters: a loop
+ * that treats an interrupted run as complete sends the instruction again, so every
+ * Esc produced another copy of the command. This is what the driver checks before
+ * it decides the run accomplished anything.
+ *
+ * Buffered the same way as {@link idleWaiter}, for the same reason: an interruption
+ * published between runs must not be lost.
+ */
+export function interruptWaiter(
+  bus: Bus.Interface,
+  sessionID: string,
+): Effect.Effect<() => Effect.Effect<boolean>, never, Scope.Scope> {
+  return Effect.gen(function* () {
+    const queue = yield* Queue.unbounded<boolean>()
+    const subscription = bus.subscribe(SessionEvent.Execution.Interrupted).pipe(
+      // Only the user's own interruption ends a loop. Inactivity is the session going
+      // quiet, and shutdown is the process going away; neither is the user saying stop.
+      Stream.filter((event) => (event.data as { sessionID?: string }).sessionID === sessionID),
+      Stream.runForEach(() => Queue.offer(queue, true)),
+    )
+    yield* Effect.forkScoped(subscription, { startImmediately: true })
+    // Blocks until an interruption arrives, so it can be raced against the run
+    // finishing. An interruption already queued fires at once; one that arrives later
+    // still fires, which is what makes an Esc mid-run stop the loop rather than be
+    // missed by a one-shot check.
+    return () => Queue.take(queue).pipe(Effect.orDie)
+  })
+}
+
+/**
  * drive runs one session's loop until it ends, pauses, or is interrupted.
  *
  * One fiber per session lives in the map, so two drivers can never race the same
@@ -132,7 +165,10 @@ export function drive(input: { loop: LoopPort; sessions: SessionPort; bus: Bus.I
       // the loop then waits forever — which is exactly what happened, a loop that ran
       // its first turn and stopped. `sessions.wait` reports the state instead, so a
       // run that is already over still lets the next iteration start.
-      const waitForIdle = yield* idleWaiter(input.bus, sessionID)
+      // `sessions.wait` is what the run waits on, because it reports state rather than
+      // an edge. The interrupt waiter runs alongside it, so an Esc during the run is
+      // caught instead of being missed by a one-shot check.
+      const interrupted = yield* interruptWaiter(input.bus, sessionID)
       while (true) {
         const record = yield* input.loop.status(sessionID)
         if (record === undefined || record.state === "ended" || record.state === "paused") return
@@ -150,9 +186,21 @@ export function drive(input: { loop: LoopPort; sessions: SessionPort; bus: Bus.I
         const before = yield* input.sessions.messages(sessionID)
         yield* input.sessions.prompt({ sessionID, text: record.instruction, delivery: "queue" })
 
-        // Wait for the run to finish. Raced against the idle event so whichever
-        // arrives first releases the driver, and neither alone can hang it.
-        yield* Effect.raceFirst(input.sessions.wait(sessionID), waitForIdle().pipe(Effect.timeoutOption("10 minutes")))
+        // Wait for the run to end, or for the user to cut it short. Racing the two
+        // together is the whole point: whichever happens first is what the loop reacts
+        // to, and an interruption is not a completed turn.
+        const outcome = yield* Effect.raceFirst(
+          input.sessions.wait(sessionID).pipe(Effect.as("done" as const)),
+          interrupted().pipe(Effect.as("interrupted" as const)),
+        )
+
+        // A run the user cut short is over, not complete. Without this check Esc looked
+        // exactly like a finished turn, so every interruption sent the instruction
+        // again and the loop became a spammer the user could not stop by interrupting.
+        if (outcome === "interrupted") {
+          yield* input.loop.put(LoopState.end(dispatched, "interrupted"))
+          return
+        }
 
         // A run that only wrote prose is not progress, and two of those in a row end
         // the loop rather than letting it spend its whole budget talking.

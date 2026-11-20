@@ -5,6 +5,7 @@ import { Bus } from "@opencode/core/bus"
 import { KV } from "@opencode/core/kv"
 import { Loop } from "@opencode/core/loop"
 import { Session } from "@opencode/core/session"
+import { SessionEvent } from "@opencode/schema/session-event"
 import { SessionStatusEvent } from "@opencode/schema/session-status-event"
 import { LayerNode } from "@opencode/util/effect/layer-node"
 import { testEffect } from "./lib/effect"
@@ -16,20 +17,26 @@ const it = testEffect(LayerNode.compile(LayerNode.group([Bus.node, KV.node, Loop
 const sessionStub = Effect.gen(function* () {
   const prompts = yield* Ref.make<string[]>([])
   const notices = yield* Ref.make<string[]>([])
-  const release = yield* Deferred.make<void>()
+  // A deferred that is replaced when it fires, so every wait can be released and the
+  // next one still blocks. A single-shot deferred leaves the driver's second wait
+  // hanging, and the loop never reaches its next iteration.
+  const gate = yield* Ref.make(yield* Deferred.make<void>())
   return {
     port: {
       prompt: (input: { text: string }) => Ref.update(prompts, (all) => [...all, input.text]),
       messages: () => Effect.succeed([{ type: "assistant", content: [{ type: "tool", name: "bash" }] }] as never),
       notify: (input: { text: string }) => Ref.update(notices, (all) => [...all, input.text]),
-      // Blocks until the test releases it, standing in for a session that is busy.
-      // A stub that resolved at once would let the driver spin through its whole
-      // budget before the test could look, which is not what a real session does.
-      wait: () => Deferred.await(release.pipe(Effect.orDie)),
+      wait: () => Ref.get(gate).pipe(Effect.flatMap((d) => Deferred.await(d))),
     },
     prompts,
     notices,
-    release,
+    /** Marks the current run finished and arms the next wait. */
+    finish: () =>
+      Ref.get(gate).pipe(
+        Effect.flatMap((d) => Deferred.succeed(d, undefined)),
+        Effect.andThen(Deferred.make<void>()),
+        Effect.flatMap((next) => Ref.set(gate, next)),
+      ),
   }
 })
 
@@ -43,7 +50,6 @@ describe("Loop.serve", () => {
   it.effect("picks up a loop already stored at boot", () =>
     Effect.gen(function* () {
       const loop = yield* Loop.Service
-      const bus = yield* Bus.Service
       const stub = yield* sessionStub
       yield* loop.start({ sessionID, request: { kind: "start", mode: "until-done", instruction: "keep at it" } })
 
@@ -53,7 +59,11 @@ describe("Loop.serve", () => {
 
       expect(yield* Ref.get(stub.prompts)).toEqual(["keep at it"])
 
-      yield* bus.publish(SessionStatusEvent.Status, { sessionID, status: { type: "idle" } })
+      // The run finishes, so the next iteration starts. An idle event is not what the
+      // driver waits on — that is what kept a finished run from advancing.
+      yield* stub.finish()
+      yield* Effect.yieldNow
+      yield* Effect.yieldNow
       yield* Effect.yieldNow
       expect((yield* Ref.get(stub.prompts)).length).toBeGreaterThan(1)
     }),
@@ -105,6 +115,35 @@ describe("Loop.serve", () => {
       yield* Effect.yieldNow
       // An ended loop is not picked up, so a stop survives a restart of the driver.
       expect(yield* Ref.get(stub.prompts)).toEqual([])
+    }),
+  )
+
+  it.effect("a run the user interrupts ends the loop instead of re-sending it", () =>
+    Effect.gen(function* () {
+      const loop = yield* Loop.Service
+      const bus = yield* Bus.Service
+      const stub = yield* sessionStub
+      yield* loop.start({ sessionID, request: { kind: "start", mode: "until-done", instruction: "spam me" } })
+      yield* loop.serve(stub.port).pipe(Effect.forkScoped)
+      yield* Effect.yieldNow
+      yield* Effect.yieldNow
+
+      // One run is out. The user presses Esc, which interrupts it — the event lands
+      // while the driver is waiting, which is when it really happens.
+      expect(yield* Ref.get(stub.prompts)).toEqual(["spam me"])
+      yield* bus.publish(SessionEvent.Execution.Interrupted, { sessionID, reason: "user" } as never)
+      yield* Effect.yieldNow
+      // Release the wait so the driver reaches its decision, as an interrupted run does.
+      yield* stub.finish()
+      yield* Effect.yieldNow
+      yield* Effect.yieldNow
+      yield* Effect.yieldNow
+
+      // The loop must end, not re-send. Esc used to look like a finished turn, so the
+      // instruction came back every time the user interrupted it.
+      expect(yield* Ref.get(stub.prompts)).toEqual(["spam me"])
+      expect((yield* loop.status(sessionID))?.state).toBe("ended")
+      expect((yield* loop.status(sessionID))?.endReason).toBe("interrupted")
     }),
   )
 })

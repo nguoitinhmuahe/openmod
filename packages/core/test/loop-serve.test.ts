@@ -27,6 +27,8 @@ const sessionStub = Effect.gen(function* () {
       messages: () => Effect.succeed([{ type: "assistant", content: [{ type: "tool", name: "bash" }] }] as never),
       notify: (input: { text: string }) => Ref.update(notices, (all) => [...all, input.text]),
       wait: () => Ref.get(gate).pipe(Effect.flatMap((d) => Deferred.await(d))),
+      // Never already busy: these stubs model a session the driver starts itself.
+      active: () => Effect.succeed(false),
     },
     prompts,
     notices,

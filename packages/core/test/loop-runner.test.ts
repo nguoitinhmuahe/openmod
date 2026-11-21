@@ -40,6 +40,8 @@ const countingSession = Effect.gen(function* () {
         ),
       ),
     wait: () => Ref.get(gate).pipe(Effect.flatMap((d) => Deferred.await(d))),
+    // Never already busy: these stubs model a session the driver starts itself.
+    active: () => Effect.succeed(false),
   }
   return {
     service,

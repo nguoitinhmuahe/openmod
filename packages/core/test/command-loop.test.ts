@@ -25,15 +25,19 @@ const it = testEffect(AppNodeBuilder.build(Tool.node, toolNodeReplacements()))
  * The invocation carries only the arguments: the TUI strips the command word
  * before it calls the server, so `text` here is what followed `/loop `.
  *
- * Replies are collected from `synthetic`, and `prompt` is a trap that fails the
- * test if it is called. A command's answer must never reach the model: `prompt` is
- * input to it, so a status line sent that way becomes the model's instruction —
- * which is the bug this pins.
+ * Replies are collected from `synthetic` and instructions from `prompt`, kept
+ * apart on purpose. A status line that reaches `prompt` becomes the model's
+ * instruction — that was one bug. An instruction the model never receives through
+ * `prompt` is another: the model then runs on the status line alone and goes
+ * looking for a task in the database, which is what a real session did.
  */
-const withCommands = <A, E, R>(use: (commands: CommandDefinition[], replies: string[]) => Effect.Effect<A, E, R>) =>
+const withCommands = <A, E, R>(
+  use: (commands: CommandDefinition[], replies: string[], dispatched: string[]) => Effect.Effect<A, E, R>,
+) =>
   Effect.gen(function* () {
     const commands: CommandDefinition[] = []
     const replies: string[] = []
+    const dispatched: string[] = []
     yield* registerToolPlugin(LoopTools.Plugin, {
       event: { subscribe: () => Stream.never },
       command: {
@@ -46,13 +50,13 @@ const withCommands = <A, E, R>(use: (commands: CommandDefinition[], replies: str
           Effect.sync(() => {
             replies.push(input.text)
           })) as never,
-        prompt: (() =>
-          Effect.die(
-            "the /loop command must not prompt the model — a reply sent through prompt becomes the model's instruction",
-          )) as never,
+        prompt: ((input: { text: string }) =>
+          Effect.sync(() => {
+            dispatched.push(input.text)
+          })) as never,
       },
     })
-    return yield* use(commands, replies)
+    return yield* use(commands, replies, dispatched)
   })
 
 const invoke = (commands: CommandDefinition[], text: string) =>
@@ -67,9 +71,27 @@ const invoke = (commands: CommandDefinition[], text: string) =>
 const run = <A, E>(effect: Effect.Effect<A, E, Loop.Service>) => effect.pipe(Effect.provide(loopLayer))
 
 describe("/loop command", () => {
+  it.effect("the instruction reaches the model, and the reply does not", () =>
+    run(
+      withCommands((commands, replies, dispatched) =>
+        Effect.gen(function* () {
+          yield* invoke(commands, "fix the tests")
+          // The model must be given the task. A real session instead ran for 113
+          // seconds on the status line alone and went looking for its task in the
+          // database, because the instruction was never sent.
+          expect(dispatched).toEqual(["fix the tests"])
+          // The status line goes to the user only. Sending it through `prompt` makes it
+          // the model's instruction, which is the other half of that bug.
+          expect(replies.join(" ")).toContain("Loop started")
+          expect(dispatched.some((text) => text.includes("Loop started"))).toBe(false)
+        }),
+      ),
+    ),
+  )
+
   it.effect("a bare instruction starts an until-done loop", () =>
     run(
-      withCommands((commands, replies) =>
+      withCommands((commands, replies, dispatched) =>
         Effect.gen(function* () {
           const loop = yield* Loop.Service
           yield* invoke(commands, "fix the tests")
@@ -84,7 +106,7 @@ describe("/loop command", () => {
 
   it.effect("an interval token starts an interval loop and keeps the instruction intact", () =>
     run(
-      withCommands((commands, replies) =>
+      withCommands((commands, replies, dispatched) =>
         Effect.gen(function* () {
           const loop = yield* Loop.Service
           yield* invoke(commands, "5m check the build")
@@ -100,7 +122,7 @@ describe("/loop command", () => {
 
   it.effect("stop ends the loop", () =>
     run(
-      withCommands((commands) =>
+      withCommands((commands, _replies, dispatched) =>
         Effect.gen(function* () {
           const loop = yield* Loop.Service
           yield* invoke(commands, "keep going")
@@ -113,7 +135,7 @@ describe("/loop command", () => {
 
   it.effect("starting over replaces the previous loop and says the old one was abandoned", () =>
     run(
-      withCommands((commands, replies) =>
+      withCommands((commands, replies, dispatched) =>
         Effect.gen(function* () {
           const loop = yield* Loop.Service
           yield* invoke(commands, "first")
@@ -129,7 +151,7 @@ describe("/loop command", () => {
 
   it.effect("status reports the loop without changing it", () =>
     run(
-      withCommands((commands, replies) =>
+      withCommands((commands, replies, dispatched) =>
         Effect.gen(function* () {
           const loop = yield* Loop.Service
           yield* invoke(commands, "fix the tests")
@@ -143,7 +165,7 @@ describe("/loop command", () => {
 
   it.effect("a duration with no instruction is refused instead of starting a loop", () =>
     run(
-      withCommands((commands, replies) =>
+      withCommands((commands, replies, dispatched) =>
         Effect.gen(function* () {
           const loop = yield* Loop.Service
           yield* invoke(commands, "2h")

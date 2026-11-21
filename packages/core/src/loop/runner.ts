@@ -48,6 +48,14 @@ export type SessionPort = {
    * waits forever. This reports the state rather than the edge, so it cannot miss.
    */
   readonly wait: (sessionID: SessionID) => Effect.Effect<void, unknown>
+  /**
+   * Whether the session has a run in flight right now.
+   *
+   * The command dispatches the first run itself, so the driver must not send a
+   * second one on top of it. Checking here is also what the spec means by one run
+   * in flight at a time, however a loop was started.
+   */
+  readonly active: (sessionID: SessionID) => Effect.Effect<boolean, unknown>
 }
 
 /**
@@ -172,6 +180,11 @@ export function drive(input: { loop: LoopPort; sessions: SessionPort; bus: Bus.I
       while (true) {
         const record = yield* input.loop.status(sessionID)
         if (record === undefined || record.state === "ended" || record.state === "paused") return
+
+        // The command dispatches the first run itself, so it may already be going. Wait
+        // for it rather than sending a second instruction on top: one run in flight is
+        // the rule, and two would put the instruction in the context twice.
+        if (yield* input.sessions.active(sessionID)) yield* input.sessions.wait(sessionID)
 
         // Stamp the iteration, not the clock. `lastRunAt` is written when the run ends,
         // so the interval counts from the reply — that is what "loop 30s" means, and

@@ -146,6 +146,18 @@ export const Plugin = {
             // silently drops the first instruction the user thought was running.
             const previous = yield* loop.status(input.sessionID)
             const started = yield* loop.start({ sessionID: input.sessionID, request })
+
+            // Dispatch the first run here, and steer rather than queue.
+            //
+            // A real session showed the cost of getting this wrong: the instruction
+            // arrived 41 seconds late, after a whole turn in which the model had no task
+            // in its context and read the loop table trying to guess one. `queue` waits
+            // for an idle session, so the run that the prompt itself woke would start
+            // before its own message was admitted. Steering admits the text first.
+            yield* ctx.session
+              .prompt({ sessionID: input.sessionID, text: request.instruction, delivery: "steer" })
+              .pipe(Effect.orDie)
+
             const what =
               started.mode === "interval"
                 ? `every ${formatInterval(started.intervalMs ?? 0)}`

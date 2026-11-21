@@ -590,6 +590,15 @@ const Root = Spec.make(typeof OPENCODE_CLI_NAME === "string" ? OPENCODE_CLI_NAME
         stdio: Flag.Boolean("stdio").pipe(Flag.withDefault(false)),
       },
     }),
+    Spec.make("doctor", {
+      description: "Check the install and report what is broken, and how to fix it",
+      params: {
+        json: Flag.Boolean("json").pipe(
+          Flag.withDescription("Print the report as JSON instead of the aligned text"),
+          Flag.withDefault(false),
+        ),
+      },
+    }),
   ],
 })
 

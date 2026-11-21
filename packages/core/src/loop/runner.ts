@@ -48,14 +48,6 @@ export type SessionPort = {
    * waits forever. This reports the state rather than the edge, so it cannot miss.
    */
   readonly wait: (sessionID: SessionID) => Effect.Effect<void, unknown>
-  /**
-   * Whether the session has a run in flight right now.
-   *
-   * The command dispatches the first run itself, so the driver must not send a
-   * second one on top of it. Checking here is also what the spec means by one run
-   * in flight at a time, however a loop was started.
-   */
-  readonly active: (sessionID: SessionID) => Effect.Effect<boolean, unknown>
 }
 
 /**
@@ -179,22 +171,44 @@ export function drive(input: { loop: LoopPort; sessions: SessionPort; bus: Bus.I
       const interrupted = yield* interruptWaiter(input.bus, sessionID)
       while (true) {
         const record = yield* input.loop.status(sessionID)
-        if (record === undefined || record.state === "ended" || record.state === "paused") return
+        if (record === undefined || record.state === "ended" || record.state === "paused") {
+          yield* Effect.logInfo("loop driver exits", { reason: record === undefined ? "gone" : record.state, record })
+          return
+        }
+        yield* Effect.logInfo("loop driver turn start", {
+          iteration: record.iteration,
+          state: record.state,
+          lastRunAt: record.lastRunAt,
+          intervalMs: record.intervalMs,
+          now: yield* Clock.currentTimeMillis,
+        })
 
-        // The command dispatches the first run itself, so it may already be going. Wait
-        // for it rather than sending a second instruction on top: one run in flight is
-        // the rule, and two would put the instruction in the context twice.
-        if (yield* input.sessions.active(sessionID)) yield* input.sessions.wait(sessionID)
+        // Only one sender: the driver. The command no longer dispatches, so there is no
+        // first run to wait for and no duplicate instruction 18 seconds later.
+        //
+        // `steer`, not `queue`, for the first run of an iteration. Queue waits for an
+        // idle session, and the wake this prompt causes can start the run before the
+        // prompt's own text is admitted — measured as the instruction arriving 41
+        // seconds late, after a turn spent with no task in context.
+        // Steer only the very first dispatch of a loop, recognised by a record that has
+        // never completed a run. `iteration` cannot be the test: nothing increments it
+        // before a run, so every dispatch of an interval loop would steer.
+        const first = record.lastRunAt === undefined
+        yield* input.sessions.prompt({
+          sessionID,
+          text: record.instruction,
+          delivery: first ? "steer" : "queue",
+        })
 
-        // Stamp the iteration, not the clock. `lastRunAt` is written when the run ends,
-        // so the interval counts from the reply — that is what "loop 30s" means, and
-        // stamping here instead would make a slow run eat its own wait.
-        const dispatched = { ...record, iteration: record.iteration }
-        yield* input.loop.put(dispatched)
-        // Snapshot before the run, so the messages it adds can be told apart from
-        // the history that was already there.
+        // No write here. Stamping the record before the run was the source of two
+        // bugs: it overwrote an ending the model wrote during the previous run (a
+        // completed loop ran eight more times), and it made the interval measure from
+        // the dispatch. `afterIdle` writes the record once, at the end, from the
+        // current state — that is the only write the driver needs.
+        const dispatched = record
+        // Snapshot after dispatch, so the run's own messages can be told apart from the
+        // history that was already there.
         const before = yield* input.sessions.messages(sessionID)
-        yield* input.sessions.prompt({ sessionID, text: record.instruction, delivery: "queue" })
 
         // Wait for the run to end, or for the user to cut it short. Racing the two
         // together is the whole point: whichever happens first is what the loop reacts
@@ -203,6 +217,7 @@ export function drive(input: { loop: LoopPort; sessions: SessionPort; bus: Bus.I
           input.sessions.wait(sessionID).pipe(Effect.as("done" as const)),
           interrupted().pipe(Effect.as("interrupted" as const)),
         )
+        yield* Effect.logInfo("loop driver run finished", { outcome, at: yield* Clock.currentTimeMillis })
 
         // A run the user cut short is over, not complete. Without this check Esc looked
         // exactly like a finished turn, so every interruption sent the instruction
@@ -210,6 +225,12 @@ export function drive(input: { loop: LoopPort; sessions: SessionPort; bus: Bus.I
         // Read the store first: the model may have ended the loop during this run by
         // calling loop_complete, and that ending must win.
         const latest = yield* input.loop.status(sessionID)
+        yield* Effect.logInfo("loop driver after run", {
+          outcome,
+          hasLatest: latest !== undefined,
+          state: latest?.state,
+          endReason: latest?.endReason,
+        })
         if (
           outcome === "interrupted" ||
           latest === undefined ||
@@ -229,15 +250,26 @@ export function drive(input: { loop: LoopPort; sessions: SessionPort; bus: Bus.I
         // model's loop_complete was stored, then overwritten by this driver's own
         // stale view, and the same instruction went out again — eight times in one
         // real session.
+        //
+        // `lastRunAt` is set to now before the decision, because now IS when this run
+        // ended. Leaving it unset made the interval measure from the current moment,
+        // so it always read as "already due" and an interval loop re-sent at once —
+        // measured on a real session as gaps of 0.01s, 30.0s, 0.01s between sends.
+        const endedAt = yield* Clock.currentTimeMillis
         const after = yield* input.sessions.messages(sessionID)
         const decision = LoopState.afterIdle(
-          { ...latest, iteration: dispatched.iteration },
-          {
-            now: yield* Clock.currentTimeMillis,
-            progressed: LoopProgress.progressed(before, after),
-          },
+          { ...latest, iteration: dispatched.iteration, lastRunAt: endedAt },
+          { now: endedAt, progressed: LoopProgress.progressed(before, after) },
         )
         yield* input.loop.put(decision.record)
+        yield* Effect.logInfo("loop driver decided", {
+          action: decision.action,
+          waitMs: decision.waitMs,
+          iteration: decision.record.iteration,
+          state: decision.record.state,
+          previousLastRunAt: latest.lastRunAt,
+          endedAt,
+        })
         if (decision.action === "end") return
         if (decision.action === "wait" && decision.waitMs !== undefined && decision.waitMs > 0)
           yield* Effect.sleep(decision.waitMs)
@@ -253,6 +285,11 @@ export function drive(input: { loop: LoopPort; sessions: SessionPort; bus: Bus.I
       Effect.gen(function* () {
         if (yield* FiberMap.has(drivers, sessionID)) return
         const record = yield* input.loop.status(sessionID)
+        yield* Effect.logInfo("loop attach", {
+          sessionID,
+          hasRecord: record !== undefined,
+          state: record?.state,
+        })
         if (record === undefined || record.state === "ended" || record.state === "paused") return
         yield* FiberMap.run(drivers, sessionID, run(sessionID))
       })

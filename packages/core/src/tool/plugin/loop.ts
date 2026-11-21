@@ -142,33 +142,22 @@ export const Plugin = {
               return
             }
 
-            // Starting over replaces the previous loop; say so, or a second /loop
-            // silently drops the first instruction the user thought was running.
+            // Create the loop and let the driver dispatch it. Sending from here too was
+            // a duplicate: the command's instruction and the driver's arrived 18 seconds
+            // apart in one real session, because the driver's `active` check found the
+            // command's run already finished and sent its own. One sender, and it is the
+            // driver — repetition is its job.
             const previous = yield* loop.status(input.sessionID)
             const started = yield* loop.start({ sessionID: input.sessionID, request })
 
-            // Dispatch the first run here, and steer rather than queue.
-            //
-            // A real session showed the cost of getting this wrong: the instruction
-            // arrived 41 seconds late, after a whole turn in which the model had no task
-            // in its context and read the loop table trying to guess one. `queue` waits
-            // for an idle session, so the run that the prompt itself woke would start
-            // before its own message was admitted. Steering admits the text first.
-            yield* ctx.session
-              .prompt({ sessionID: input.sessionID, text: request.instruction, delivery: "steer" })
-              .pipe(Effect.orDie)
-
-            const what =
-              started.mode === "interval"
-                ? `every ${formatInterval(started.intervalMs ?? 0)}`
-                : "until it is done or blocked"
-            yield* reply(
-              ctx,
-              input.sessionID,
-              previous === undefined || previous.state === "ended" || previous.state === "paused"
-                ? `Loop started: ${what}.`
-                : `Loop started: ${what}. The previous loop was abandoned.`,
-            )
+            // Only note what the user cannot see for themselves. No "Loop started" line:
+            // every message in this session is context for the model, so a notice is
+            // read as part of the task — one run spent 113 seconds on the notice alone,
+            // with no instruction, and went looking for its task in the database.
+            // The instruction appearing in the transcript is the confirmation.
+            if (previous !== undefined && previous.state !== "ended" && previous.state !== "paused")
+              yield* reply(ctx, input.sessionID, `The previous ${previous.mode} loop was abandoned.`)
+            void started
           }).pipe(Effect.orDie),
       })
     })

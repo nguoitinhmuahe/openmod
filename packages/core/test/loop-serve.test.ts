@@ -27,8 +27,6 @@ const sessionStub = Effect.gen(function* () {
       messages: () => Effect.succeed([{ type: "assistant", content: [{ type: "tool", name: "bash" }] }] as never),
       notify: (input: { text: string }) => Ref.update(notices, (all) => [...all, input.text]),
       wait: () => Ref.get(gate).pipe(Effect.flatMap((d) => Deferred.await(d))),
-      // Never already busy: these stubs model a session the driver starts itself.
-      active: () => Effect.succeed(false),
     },
     prompts,
     notices,
@@ -103,6 +101,41 @@ describe("Loop.serve", () => {
       yield* loop.serve(stub.port).pipe(Effect.forkScoped)
       yield* Effect.yieldNow
       expect(yield* Ref.get(stub.prompts)).toEqual([])
+    }),
+  )
+
+  it.effect("a loop the model pauses during its interval wait stays paused", () =>
+    Effect.gen(function* () {
+      const loop = yield* Loop.Service
+      const stub = yield* sessionStub
+      yield* loop.start({
+        sessionID,
+        request: { kind: "start", mode: "interval", intervalMs: 30_000, instruction: "say ok" },
+      })
+      yield* loop.serve(stub.port).pipe(Effect.forkScoped)
+      yield* Effect.yieldNow
+      yield* Effect.yieldNow
+      expect(yield* Ref.get(stub.prompts)).toEqual(["say ok"])
+
+      // The run ends, so the driver enters its interval wait.
+      yield* stub.finish()
+      yield* Effect.yieldNow
+      yield* Effect.yieldNow
+      expect((yield* loop.status(sessionID))?.state).toBe("waiting")
+
+      // Now the model pauses the loop — it does this after the run, while the driver
+      // is sleeping out the interval. A real session did exactly this and the pause
+      // was lost: the driver's own waiting record overwrote it, and the loop kept
+      // sending "say ok" every 30 seconds with the tool reporting "Loop paused".
+      yield* loop.stop(sessionID, "blocked", "not an actionable task")
+
+      yield* TestClock.adjust("30 seconds")
+      yield* Effect.yieldNow
+      yield* Effect.yieldNow
+
+      expect((yield* loop.status(sessionID))?.state).toBe("paused")
+      expect((yield* loop.status(sessionID))?.endReason).toBe("blocked")
+      expect(yield* Ref.get(stub.prompts)).toEqual(["say ok"])
     }),
   )
 

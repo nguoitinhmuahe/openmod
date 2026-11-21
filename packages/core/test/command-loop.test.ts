@@ -71,19 +71,18 @@ const invoke = (commands: CommandDefinition[], text: string) =>
 const run = <A, E>(effect: Effect.Effect<A, E, Loop.Service>) => effect.pipe(Effect.provide(loopLayer))
 
 describe("/loop command", () => {
-  it.effect("the instruction reaches the model, and the reply does not", () =>
+  it.effect("the command starts the loop without sending anything to the model", () =>
     run(
       withCommands((commands, replies, dispatched) =>
         Effect.gen(function* () {
+          const loop = yield* Loop.Service
           yield* invoke(commands, "fix the tests")
-          // The model must be given the task. A real session instead ran for 113
-          // seconds on the status line alone and went looking for its task in the
-          // database, because the instruction was never sent.
-          expect(dispatched).toEqual(["fix the tests"])
-          // The status line goes to the user only. Sending it through `prompt` makes it
-          // the model's instruction, which is the other half of that bug.
-          expect(replies.join(" ")).toContain("Loop started")
-          expect(dispatched.some((text) => text.includes("Loop started"))).toBe(false)
+          // The driver is the only sender. A command that also sent produced a duplicate
+          // instruction 18 seconds later in a real session, and any notice it added to
+          // the session became context the model read as part of the task.
+          expect(dispatched).toEqual([])
+          expect(replies).toEqual([])
+          expect((yield* loop.status(sessionID))?.instruction).toBe("fix the tests")
         }),
       ),
     ),
@@ -98,7 +97,6 @@ describe("/loop command", () => {
           const record = yield* loop.status(sessionID)
           expect(record?.mode).toBe("until-done")
           expect(record?.instruction).toBe("fix the tests")
-          expect(replies.join(" ")).toContain("until it is done")
         }),
       ),
     ),
@@ -114,7 +112,6 @@ describe("/loop command", () => {
           expect(record?.mode).toBe("interval")
           expect(record?.intervalMs).toBe(300_000)
           expect(record?.instruction).toBe("check the build")
-          expect(replies.join(" ")).toContain("every 5m")
         }),
       ),
     ),

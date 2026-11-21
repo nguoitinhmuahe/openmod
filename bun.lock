@@ -117,6 +117,7 @@
         "@clack/prompts": "1.0.0-alpha.1",
         "@effect/platform-node": "catalog:",
         "@opencode/client": "workspace:*",
+        "@opencode/core": "workspace:*",
         "@opencode/plugin": "workspace:*",
         "@opencode/pty": "0.6.0",
         "@opencode/schema": "workspace:*",
@@ -589,6 +590,20 @@
       },
       "peerDependencies": {
         "@opencode/plugin": "^2.0.27 || ^0.0.0-dev",
+      },
+    },
+    "packages/plugins/opencode-mod": {
+      "name": "@opencode/plugin-mod",
+      "version": "2.3.0",
+      "dependencies": {
+        "@opencode/plugin": "workspace:*",
+        "@opencode/schema": "workspace:*",
+        "effect": "catalog:",
+      },
+      "devDependencies": {
+        "@tsconfig/bun": "1.0.9",
+        "@types/bun": "1.4.3",
+        "@typescript/native": "npm:typescript@7.1.0-beta",
       },
     },
     "packages/protocol": {
@@ -1830,6 +1845,8 @@
     "@opencode/plugin-browser": ["@opencode/plugin-browser@workspace:packages/plugin-browser"],
 
     "@opencode/plugin-figma": ["@opencode/plugin-figma@workspace:packages/plugins/figma"],
+
+    "@opencode/plugin-mod": ["@opencode/plugin-mod@workspace:packages/plugins/opencode-mod"],
 
     "@opencode/protocol": ["@opencode/protocol@workspace:packages/protocol"],
 

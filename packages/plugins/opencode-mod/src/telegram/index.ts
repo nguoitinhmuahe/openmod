@@ -12,7 +12,7 @@ import { join } from "node:path"
 import type { PluginContext } from "../plugin.ts"
 import { createBot } from "./bot.ts"
 import { createBridge } from "./bridge.ts"
-import { load, save, paired } from "./token.ts"
+import { load, save, paired } from "@opencode/core/telegram/token"
 
 /** Where the token lives: beside the rest of OpenMod's data, not in config. */
 const tokenPath = () => join(process.env.OPENCODE_DATA ?? join(homedir(), ".local", "share", "opencode"), "telegram.json")

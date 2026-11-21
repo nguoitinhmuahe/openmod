@@ -3,6 +3,9 @@ import { dirname } from "node:path"
 
 // Where the bot token lives.
 //
+// In core rather than the plugin, so `opencode telegram pair` can write it without
+// the CLI depending on a plugin package. The plugin reads the same file.
+//
 // A file, not the config and not the database: the config is read into logs and
 // error messages by other code, and a token there would leak the first time
 // something printed it. The file is created 0600 so only this user can read it,

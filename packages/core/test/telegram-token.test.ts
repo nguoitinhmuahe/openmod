@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtemp, rm, stat } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { clear, load, paired, save } from "../src/telegram/token"
+import { clear, load, paired, save } from "@opencode/core/telegram/token"
 
 const dirs: string[] = []
 const tempPath = async () => {
@@ -26,14 +26,10 @@ describe("token file", () => {
     const path = await tempPath()
     await save(path, { token: "123:abc", chatID: 42, username: "b" })
     const mode = (await stat(path)).mode & 0o777
-    if (process.platform === "win32") {
-      // Windows has no POSIX permission bits: a mode is accepted and ignored, and the
-      // file lands 0o666. Recorded here rather than asserted away, because it is a real
-      // limitation of the platform this fork runs on.
-      expect(mode).toBe(0o666)
-    } else {
-      expect(mode).toBe(0o600)
-    }
+    // Windows has no POSIX permission bits: a mode is accepted and ignored. The ACL
+    // is what restricts it there, and that is exercised below.
+    if (process.platform === "win32") expect(mode).toBe(0o666)
+    else expect(mode).toBe(0o600)
   })
 
   test("a missing file is not an error, it is simply not set up", async () => {

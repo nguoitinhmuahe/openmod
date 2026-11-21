@@ -599,6 +599,24 @@ const Root = Spec.make(typeof OPENCODE_CLI_NAME === "string" ? OPENCODE_CLI_NAME
         ),
       },
     }),
+    Spec.make("telegram", {
+      description: "Connect the Telegram bridge",
+      commands: [
+        Spec.make("pair", {
+          description: "Store a bot token and the chat to answer, after checking the token works",
+          params: {
+            token: Argument.String("token").pipe(
+              Argument.withDescription("Bot token from @BotFather. Stored in a file only this user can read."),
+            ),
+            chat: Argument.String("chat").pipe(
+              Argument.withDescription("Chat id to notify, from @userinfobot"),
+            ),
+          },
+        }),
+        Spec.make("status", { description: "Show which chat is paired" }),
+        Spec.make("logout", { description: "Forget the stored token" }),
+      ],
+    }),
   ],
 })
 

@@ -44,6 +44,11 @@ let terminated = false
 const Handlers = Runtime.handlers(Commands, {
   $: () => import("./commands/handlers/default"),
   doctor: () => import("./commands/handlers/doctor"),
+  telegram: {
+    pair: () => import("./commands/handlers/telegram/pair"),
+    status: () => import("./commands/handlers/telegram/status"),
+    logout: () => import("./commands/handlers/telegram/logout"),
+  },
   upgrade: () => import("./commands/handlers/upgrade"),
   uninstall: () => import("./commands/handlers/uninstall"),
   acp: () => import("./commands/handlers/acp"),

@@ -36,7 +36,13 @@ export interface ToolHooks {
   } & (
     | {
         readonly status: "completed"
-        result: Tool.Result
+        /**
+         * A hook may replace `content`, `metadata` or `output`: the runtime reads
+         * the result back after every hook runs, so an edited value is what the
+         * model receives. This is how a post-edit hook hands its output back in
+         * the same turn, rather than only reporting it out of band.
+         */
+        result: Types.Mutable<Tool.Result>
       }
     | {
         readonly status: "error"

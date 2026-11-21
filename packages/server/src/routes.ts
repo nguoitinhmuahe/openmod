@@ -35,6 +35,7 @@ import { ModelsDev } from "@opencode/core/models-dev"
 import { SessionRestart } from "@opencode/core/session/execution/restart"
 import { Automation } from "@opencode/core/automation"
 import { Loop } from "@opencode/core/loop"
+import { Telegram } from "@opencode/core/telegram"
 import { PluginUpdate } from "@opencode/core/plugin/update"
 import { SdkPlugins } from "@opencode/core/plugin/sdk"
 import { WellKnown } from "@opencode/core/wellknown"
@@ -93,6 +94,8 @@ const applicationServiceNodes = [
   Automation.node,
   // Its driver fiber belongs to the server process, so a loop outlives a window.
   Loop.node,
+  // Its bridge polls one bot for the whole process, not per location.
+  Telegram.node,
   // Its hourly cleanup belongs to the server.
   BlobStore.node,
   // Its polling fibers belong to the server, not to the request that started them.

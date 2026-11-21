@@ -6,6 +6,7 @@ import { SessionRestart } from "@opencode/core/session/execution/restart"
 import { Automation } from "@opencode/core/automation"
 import { Loop } from "@opencode/core/loop"
 import { Session } from "@opencode/core/session"
+import { Telegram } from "@opencode/core/telegram"
 import { InstallationEvent } from "@opencode/schema/installation-event"
 import { hasPtyConnectTicketURL } from "@opencode/protocol/groups/pty"
 import { hasPersistentPtyConnectTicketURL } from "@opencode/protocol/groups/persistent-pty"
@@ -140,6 +141,15 @@ export const start = Effect.fn("ServerProcess.start")(function* <E, R>(
               .pipe(Effect.catchTag("Session.NotFoundError", () => Effect.void)),
         })
         .pipe(Effect.provideService(Bus.Service, Context.get(context, Bus.Service))),
+      applicationScope,
+    )
+    // The Telegram bridge is forked here too, and this is what makes it hear anything:
+    // `Bus.subscribe` filters a subscriber's stream by `Location.Service`, so a bridge
+    // running inside a location sees only that location's events. Forked from the
+    // process there is no location, and the filter passes everything.
+    yield* Effect.forkIn(
+      Context.get(context, Telegram.Service)
+        .serve.pipe(Effect.provideService(Bus.Service, Context.get(context, Bus.Service))),
       applicationScope,
     )
     yield* Ref.set(application, Option.some(Context.get(context, HttpRouter.HttpRouter).asHttpEffect()))

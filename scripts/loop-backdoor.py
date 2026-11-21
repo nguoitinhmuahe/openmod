@@ -101,7 +101,7 @@ def main():
         print("loop command ->", status)
 
         seen = 0
-        for tick in range(40):
+        for tick in range(70):
             time.sleep(3)
             _, listing = call("GET", f"/api/session/{sid}/message", password=password)
             msgs = (listing or {}).get("data", []) if isinstance(listing, dict) else []

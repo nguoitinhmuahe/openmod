@@ -60,7 +60,12 @@ interface ToolHooks {
   } & (
     | {
         readonly status: "completed"
-        result: Tool.Result
+        /**
+         * Mutable on purpose: the runtime re-reads this after every hook, so
+         * replacing `content` is how a hook returns extra text to the model in
+         * the same turn.
+         */
+        result: Types.Mutable<Tool.Result>
       }
     | {
         readonly status: "error"

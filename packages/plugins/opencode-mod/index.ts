@@ -1,5 +1,12 @@
 import { Plugin, type PluginContext } from "./src/plugin.ts"
 
+// The external half of the mod: the pieces that only make sense as an opt-in user
+// plugin, listed in config.
+//
+// Telegram is deliberately NOT here. It has to work the moment a token is paired,
+// without the user editing config to enable anything, so it lives as an internal
+// plugin in core (packages/core/src/tool/plugin/telegram.ts). Having it in both
+// places meant two bridges ran at once, each polling the same bot.
 export default Plugin.define({
   id: "opencode.mod",
   async setup(ctx: PluginContext) {
@@ -11,9 +18,5 @@ export default Plugin.define({
     await worktree.setup(ctx)
     await hooks.setup(ctx)
     await edits.setup(ctx)
-    // Notifications and replies. Runs only when a token was paired; setup() returns
-    // at once otherwise, so an unpaired install costs nothing.
-    const telegram = await import("./src/telegram/index.ts")
-    await telegram.setup(ctx)
   },
 })

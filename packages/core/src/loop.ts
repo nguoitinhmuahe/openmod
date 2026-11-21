@@ -80,11 +80,21 @@ export const layer = Layer.effect(
         return yield* read(sessionID)
       }),
       list: Effect.fn("Loop.list")(function* () {
-        const scanned = yield* kv.scan({ prefix: "loop:" })
-        return scanned.entries.flatMap((entry) => {
-          const record = LoopStore.decode(entry.value)
-          return record === undefined ? [] : [record]
-        })
+        // Every page, not just the first. `scan` pages at 100 rows and returns a cursor
+        // when there are more; reading only the first page meant a loop whose key sorted
+        // past the hundredth record was stored and never driven.
+        const records: LoopState.Record[] = []
+        let after: string | undefined
+        while (true) {
+          const scanned = yield* kv.scan({ prefix: "loop:", limit: 1000, ...(after === undefined ? {} : { after }) })
+          for (const entry of scanned.entries) {
+            const record = LoopStore.decode(entry.value)
+            if (record !== undefined) records.push(record)
+          }
+          if (scanned.next === undefined) break
+          after = scanned.next
+        }
+        return records
       }),
       put: Effect.fn("Loop.put")(function* (record) {
         yield* write(record)

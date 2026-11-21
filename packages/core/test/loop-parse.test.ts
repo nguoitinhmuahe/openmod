@@ -45,3 +45,19 @@ describe("parseLoopRequest", () => {
     expect(parseLoopRequest("   ")).toEqual({ kind: "status" })
   })
 })
+
+describe("a zero interval", () => {
+  test("is not a duration, so /loop 0s x cannot become a hot loop", () => {
+    // With intervalMs 0 the driver's remaining-wait test is skipped and the
+    // instruction is re-sent with no delay, spending the whole iteration budget in
+    // seconds.
+    expect(parseInterval("0s")).toBeUndefined()
+    expect(parseInterval("0m")).toBeUndefined()
+    expect(parseInterval("0h0m")).toBeUndefined()
+  })
+
+  test("a non-zero interval still parses", () => {
+    expect(parseInterval("1s")).toBe(1000)
+    expect(parseInterval("0h1m")).toBe(60_000)
+  })
+})

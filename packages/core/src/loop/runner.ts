@@ -115,9 +115,14 @@ export function interruptWaiter(
   return Effect.gen(function* () {
     const queue = yield* Queue.unbounded<boolean>()
     const subscription = bus.subscribe(SessionEvent.Execution.Interrupted).pipe(
-      // Only the user's own interruption ends a loop. Inactivity is the session going
-      // quiet, and shutdown is the process going away; neither is the user saying stop.
-      Stream.filter((event) => (event.data as { sessionID?: string }).sessionID === sessionID),
+      // Only the user's own interruption ends a loop. `shutdown` is the process going
+      // away, and a loop is meant to outlive that: without the reason check, restarting
+      // the server marked every running loop ended as "interrupted".
+      Stream.filter(
+        (event) =>
+          (event.data as { sessionID?: string; reason?: string }).sessionID === sessionID &&
+          (event.data as { reason?: string }).reason === "user",
+      ),
       Stream.runForEach(() => Queue.offer(queue, true)),
     )
     yield* Effect.forkScoped(subscription, { startImmediately: true })
@@ -154,7 +159,7 @@ export function interruptWaiter(
  * cannot reference `Interface` without a cycle. It also keeps a test able to pass
  * a hand-built loop.
  */
-export type LoopPort = Pick<Loop.Interface, "status" | "put" | "list">
+export type LoopPort = Pick<Loop.Interface, "status" | "put" | "list" | "resume">
 
 export function drive(input: { loop: LoopPort; sessions: SessionPort; bus: Bus.Interface }) {
   const run = (sessionID: SessionID) =>
@@ -285,12 +290,11 @@ export function drive(input: { loop: LoopPort; sessions: SessionPort; bus: Bus.I
       Effect.gen(function* () {
         if (yield* FiberMap.has(drivers, sessionID)) return
         const record = yield* input.loop.status(sessionID)
-        yield* Effect.logInfo("loop attach", {
-          sessionID,
-          hasRecord: record !== undefined,
-          state: record?.state,
-        })
+        // No log here. This runs for every stored record on every sweep — four times a
+        // second — and a finished loop stays stored, so logging before the state check
+        // produced four lines a second per dead loop, forever.
         if (record === undefined || record.state === "ended" || record.state === "paused") return
+        yield* Effect.logInfo("loop driver attached", { sessionID })
         yield* FiberMap.run(drivers, sessionID, run(sessionID))
       })
 
@@ -303,6 +307,28 @@ export function drive(input: { loop: LoopPort; sessions: SessionPort; bus: Bus.I
         for (const record of yield* input.loop.list()) yield* attach(record.sessionID as SessionID)
       }
     }).pipe(Effect.forkScoped)
+
+    // A paused loop waits for the user. Their next message into the session is what
+    // resumes it — `loop_blocked` promises exactly that, and without this the promise
+    // was false: the record stayed paused and only a fresh `/loop` brought it back.
+    // `resume` ignores anything that is not paused, so a completed or stopped loop is
+    // untouched, and the driver's own prompts resume nothing because they are queued
+    // into a loop that is already running.
+    yield* input.bus.listen((event) =>
+      event.type === SessionEvent.InboxDelivered.type
+        ? input.loop
+            .resume((event.data as { sessionID: SessionID }).sessionID)
+            .pipe(
+              Effect.tap((record) =>
+                record === undefined
+                  ? Effect.void
+                  : Effect.logInfo("loop resumed by the user", { sessionID: record.sessionID }),
+              ),
+              Effect.catchCause((cause) => Effect.logError("loop resume failed", { cause })),
+              Effect.asVoid,
+            )
+        : Effect.void,
+    )
 
     // Hold the scope open so the drivers keep running until the caller interrupts.
     yield* Effect.never

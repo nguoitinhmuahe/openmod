@@ -1,5 +1,6 @@
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises"
-import { dirname } from "node:path"
+import { dirname, join } from "node:path"
+import { Path } from "@opencode/util/global"
 
 // Where the bot token lives.
 //
@@ -10,6 +11,17 @@ import { dirname } from "node:path"
 // error messages by other code, and a token there would leak the first time
 // something printed it. The file is created 0600 so only this user can read it,
 // and nothing here ever returns the token in a message.
+
+/**
+ * Where the token file is, in one place.
+ *
+ * It was computed separately by the CLI, the bridge and the TUI, and the three did
+ * not agree: the TUI used a phantom `OPENCODE_DATA` and `process.env.HOME`, which on
+ * Windows under Git Bash points at a different tree than `os.homedir()` — so
+ * `/telegram setup` reported success while the server saw no pairing. `Path.data` is
+ * the XDG-correct value the rest of the app already uses.
+ */
+export const pathFor = (data: string = Path.data) => join(data, "telegram.json")
 
 export type Stored = {
   readonly token: string

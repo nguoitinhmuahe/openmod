@@ -20,10 +20,14 @@ const UNITS = {
 export function parseInterval(text: string): number | undefined {
   const segments = text.match(/\d+[hms]/g)
   if (!segments || segments.join("") !== text) return undefined
-  return segments.reduce((total, segment) => {
+  const total = segments.reduce((sum, segment) => {
     const unit = segment[segment.length - 1] as keyof typeof UNITS
-    return total + Number(segment.slice(0, -1)) * UNITS[unit]
+    return sum + Number(segment.slice(0, -1)) * UNITS[unit]
   }, 0)
+  // Zero is not an interval. `due()` returns 0 for it and the caller's `remaining > 0`
+  // test is skipped, so the instruction goes out again with no delay at all — the
+  // twenty-five iteration budget spent in seconds.
+  return total > 0 ? total : undefined
 }
 
 export function parseLoopRequest(text: string): Request | { readonly kind: "invalid"; readonly reason: string } {

@@ -6,7 +6,7 @@
 
 import { access, readFile, readdir, stat } from "node:fs/promises"
 import { constants } from "node:fs"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import type { Check, Report } from "./report.ts"
 
 export type Environment = {
@@ -32,7 +32,12 @@ async function checkRuntime(): Promise<Check> {
 }
 
 async function checkConfig(path: string): Promise<Check> {
-  if (!(await exists(path))) return { name: "config", status: "warn", detail: "no config file", fix: `create ${path}` }
+  // The app accepts .jsonc as well; reporting "no config file" to someone who has one
+  // is worse than saying nothing.
+  const candidate = (await exists(path)) ? path : path.replace(/\.json$/, ".jsonc")
+  if (!(await exists(candidate)))
+    return { name: "config", status: "warn", detail: "no config file", fix: `create ${path}` }
+  path = candidate
   try {
     JSON.parse(await readFile(path, "utf8"))
     return { name: "config", status: "ok", detail: path }
@@ -69,8 +74,15 @@ async function checkTelegram(data: string): Promise<Check> {
   }
 }
 
-/** Which plugins the config asks for, and whether each can be found. */
-async function checkPlugins(configPath: string, base: string): Promise<Check> {
+/**
+ * Which plugins the config asks for, and whether each can be found.
+ *
+ * Relative package paths resolve against the config file's own directory, which is
+ * what plugin loading does (`config/plugin/source.ts`). Resolving against the working
+ * directory instead reported a healthy plugin as missing whenever `opencode doctor`
+ * ran from anywhere else, and exited non-zero, breaking scripts that gate on it.
+ */
+async function checkPlugins(configPath: string): Promise<Check> {
   if (!(await exists(configPath))) return { name: "plugins", status: "ok", detail: "none configured" }
   let configured: unknown
   try {
@@ -85,7 +97,7 @@ async function checkPlugins(configPath: string, base: string): Promise<Check> {
   for (const entry of configured) {
     const spec = typeof entry === "string" ? entry : (entry as { package?: string })?.package
     if (typeof spec !== "string" || !spec.startsWith(".")) continue
-    const path = join(base, spec)
+    const path = join(dirname(configPath), spec)
     if (!(await exists(path))) missing.push(spec)
   }
   if (missing.length > 0)
@@ -112,6 +124,6 @@ export async function gather(env: Environment): Promise<Report> {
   checks.push(await checkDatabase(env.database))
   checks.push(await checkDataDir(env.data))
   checks.push(await checkTelegram(env.data))
-  checks.push(await checkPlugins(env.config, process.cwd()))
+  checks.push(await checkPlugins(env.config))
   return { checks }
 }

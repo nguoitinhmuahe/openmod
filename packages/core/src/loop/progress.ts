@@ -15,10 +15,11 @@ const ACTING = new Set(["tool"])
 /**
  * progressed reports whether `after` contains work `before` did not.
  *
- * The comparison is positional on length, not on message identity: the caller
- * snapshots the session's messages before a run and hands back the list after it,
- * and a session's history only ever grows. Messages beyond the old length are the
- * ones this run produced.
+ * The comparison is by identity, not by position. `Session.messages` defaults to
+ * newest first, so slicing the newer list by the older list's length returns the
+ * oldest messages in the session rather than the run's own — which made every run
+ * look productive once the session's earliest turn had called a tool, and the
+ * no-progress guard never fired.
  *
  * A tool call counts whatever its state — a run that called a tool and was still
  * running when the loop looked is not idle prose. An assistant turn carrying
@@ -26,7 +27,9 @@ const ACTING = new Set(["tool"])
  * files is itself an edit.
  */
 export function progressed(before: readonly SessionMessage.Info[], after: readonly SessionMessage.Info[]): boolean {
-  for (const message of after.slice(before.length)) {
+  const seen = new Set(before.map((message) => message.id))
+  for (const message of after) {
+    if (seen.has(message.id)) continue
     if (message.type !== "assistant") continue
     if (message.snapshot?.files !== undefined && message.snapshot.files.length > 0) return true
     for (const part of message.content) {

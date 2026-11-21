@@ -1,12 +1,9 @@
 import { EOL } from "os"
-import { join } from "node:path"
 import { Effect } from "effect"
 import { Global } from "@opencode/util/global"
 import { Commands } from "../../commands"
 import { Runtime } from "../../../framework/runtime"
-import { save } from "@opencode/core/telegram/token"
-
-const path = (data: string) => join(data, "telegram.json")
+import { save, pathFor } from "@opencode/core/telegram/token"
 
 /**
  * `opencode telegram pair` — store a bot token and the chat to answer.
@@ -49,7 +46,7 @@ export default Runtime.handler(
       return
     }
 
-    yield* Effect.promise(() => save(path(global.data), { token: input.token, chatID, username: checked.success }))
+    yield* Effect.promise(() => save(pathFor(global.data), { token: input.token, chatID, username: checked.success }))
     process.stdout.write(`Paired as @${checked.success}, notifying chat ${chatID}.${EOL}`)
     process.stdout.write(`Restart the server for the bridge to start.${EOL}`)
   }),

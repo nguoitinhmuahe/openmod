@@ -132,6 +132,35 @@ export const settings: Setting[] = [
     keywords: ["attachments", "images", "tool output"],
   },
   {
+    title: "Auto compact",
+    category: "Session",
+    path: ["compaction", "auto"],
+    description: "Summarize the conversation automatically as it fills the model's window",
+    default: true,
+    values: [false, true],
+    labels: ["off", "on"],
+    keywords: ["compaction", "compact", "summarize", "context window"],
+  },
+  {
+    title: "Auto compact at",
+    category: "Session",
+    path: ["compaction", "buffer"],
+    description: "How full the context window gets before the conversation is summarized",
+    // Stored as the room kept free, which is the config's own unit, and labelled as
+    // how full the window is — the number the user thinks in. 30% free is 70% full.
+    default: "30%",
+    values: ["50%", "40%", "30%", "20%", "10%", "5%"],
+    labels: [
+      "50% full",
+      "60% full",
+      "70% full (default)",
+      "80% full",
+      "90% full",
+      "95% full",
+    ],
+    keywords: ["compaction", "threshold", "percent", "full", "buffer"],
+  },
+  {
     title: "TPS",
     category: "Session",
     path: ["session", "tps"],

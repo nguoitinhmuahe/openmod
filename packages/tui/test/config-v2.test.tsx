@@ -333,3 +333,19 @@ test("provides config and its host interface", async () => {
     app.renderer.destroy()
   }
 })
+
+test("exposes an auto-compaction threshold defaulting to 70% full", () => {
+  // The setting stores the room kept free, which is what the config schema calls
+  // `buffer`; the label says the threshold so the user reads "70% full", not "30%".
+  const threshold = settings.find((setting) => setting.path.join(".") === "compaction.buffer")
+  expect(threshold?.category).toBe("Session")
+  expect(threshold?.default).toBe("30%")
+  const at = threshold!.values!.indexOf("30%")
+  expect(threshold?.labels?.[at]).toContain("70%")
+})
+
+test("exposes whether automatic compaction is on", () => {
+  const auto = settings.find((setting) => setting.path.join(".") === "compaction.auto")
+  expect(auto?.category).toBe("Session")
+  expect(auto?.default).toBe(true)
+})

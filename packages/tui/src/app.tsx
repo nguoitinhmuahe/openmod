@@ -68,6 +68,8 @@ import { DialogMcp } from "./component/dialog-mcp"
 import { DialogUsage } from "./component/usage"
 import { DialogStatus } from "./component/dialog-status"
 import { DialogConfig } from "./component/dialog-config"
+import { TelegramLogout, TelegramSetup, TelegramStatus } from "./component/dialog-telegram"
+import { AutoCompactSetting } from "./component/dialog-autocompact"
 import { DialogDebug } from "./component/dialog-debug"
 import { DialogPair } from "./component/dialog-pair"
 import { DialogHighlights } from "./component/dialog-highlights"
@@ -640,14 +642,14 @@ function App() {
     if (!terminalTitleEnabled()) return
 
     if (route.data.type === "home") {
-      setTerminalTitle(renderer, "OpenCode")
+      setTerminalTitle(renderer, "OpenMod")
       return
     }
 
     if (route.data.type === "session") {
       const title = session?.title
       if (!title || isFallbackTitle(title)) {
-        setTerminalTitle(renderer, "OpenCode")
+        setTerminalTitle(renderer, "OpenMod")
         return
       }
 
@@ -1047,6 +1049,32 @@ function App() {
         slash: { name: "settings" },
         run: () => {
           dialog.replace(() => <DialogConfig />)
+        },
+        category: "System",
+      },
+      {
+        // The context window first, because the threshold is a share of it. The app
+        // guesses 200,000 when its catalog has no entry, and a guess makes compaction
+        // fire at the wrong point — or never, when the window is unknown entirely.
+        name: "opencode.autocompact-setting",
+        title: "Auto compact settings",
+        slash: { name: "autocompact-setting" },
+        run: () => {
+          dialog.replace(() => <AutoCompactSetting onClose={() => dialog.clear()} />)
+        },
+        category: "Session",
+      },
+      {
+        // One command with subcommands, so /telegram alone shows what is paired while
+        // /telegram setup and /telegram logout do the two things worth doing.
+        name: "opencode.telegram",
+        title: "Telegram bridge",
+        slash: { name: "telegram", arguments: true as const },
+        run: (input?: string) => {
+          const sub = (input ?? "").trim().toLowerCase()
+          if (sub === "logout") dialog.replace(() => <TelegramLogout onClose={() => dialog.clear()} />)
+          else if (sub === "setup") dialog.replace(() => <TelegramSetup onClose={() => dialog.clear()} />)
+          else dialog.replace(() => <TelegramStatus onClose={() => dialog.clear()} />)
         },
         category: "System",
       },

@@ -157,10 +157,24 @@ export const layer = Layer.effectDiscard(
             }
           : source
       const apply = (resolved: typeof immediate) =>
-        registry.activate(
-          resolved.plugins.map((plugin) => (plugin.source ? { ...plugin, source: source(plugin.source) } : plugin)),
-          resolved.failures.map((failure) => ({ ...failure, source: source(failure.source) })),
-        )
+        Effect.gen(function* () {
+          // Which plugins the host is about to run. Without this a plugin that is in
+          // the list but never activated is indistinguishable from one that failed
+          // inside, and the difference is the whole diagnosis.
+          yield* Effect.logInfo("activating plugins", {
+            ids: resolved.plugins.map((plugin) => plugin.id),
+            failures: resolved.failures.map((failure) => String(failure.id)),
+            pending: resolved.pending,
+          })
+          // `activate` is an Effect and must be run with `yield*`. Wrapping it in
+          // Effect.sync returns the Effect as a value instead, so nothing is ever
+          // activated — which silently disables every plugin, including the agents
+          // and providers they register.
+          yield* registry.activate(
+            resolved.plugins.map((plugin) => (plugin.source ? { ...plugin, source: source(plugin.source) } : plugin)),
+            resolved.failures.map((failure) => ({ ...failure, source: source(failure.source) })),
+          )
+        })
       yield* apply(immediate)
       const resolved = immediate.pending.length
         ? yield* resolve(modules, pre, post, operations, true, running)

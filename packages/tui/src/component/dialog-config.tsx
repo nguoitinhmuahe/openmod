@@ -6,6 +6,7 @@ import { DialogSelect, DialogSelectChoice } from "../ui/dialog-select"
 import { useToast } from "../ui/toast"
 import { DialogThemeList } from "./dialog-theme-list"
 import { autoCompactSettings } from "./dialog-autocompact"
+import { useClient } from "../context/client"
 
 type Setting = {
   title: string
@@ -23,6 +24,15 @@ type Setting = {
   keywords?: readonly string[]
   /** Under the "new-designs" experiment, enter opens this picker instead of cycling. ←/→ still cycle. */
   open?: (dialog: DialogContext) => void
+  /**
+   * The server owns this key, not the window.
+   *
+   * `config.update` here writes `cli.json`, which is the window's own file — theme,
+   * sidebar, sounds. The server reads `opencode.json` and `opencode.jsonc`, never
+   * `cli.json`. A compaction setting written the window's way therefore looked saved
+   * and had no effect: auto compaction stayed off, and the threshold no one read.
+   */
+  server?: boolean
 }
 
 export const settings: Setting[] = [
@@ -389,6 +399,7 @@ export function settingID(setting: Setting) {
 
 export function DialogConfig(props: { current?: string }) {
   const config = useConfig()
+  const client = useClient()
   const newDesigns = useNewDesigns()
   const dialog = useDialog()
   const toast = useToast()
@@ -444,6 +455,15 @@ export function DialogConfig(props: { current?: string }) {
       : Math.min(setting.max!, Math.max(setting.min!, Number(current) + direction * setting.step!))
     if (next === current) return
     setSaving(true)
+    if (setting.server) {
+      // Straight to the config the model runs on, which is the only one the
+      // compaction engine reads.
+      await client.api.config
+        .update({ path: setting.path, value: next })
+        .catch(toast.error)
+        .finally(() => setSaving(false))
+      return
+    }
     await config
       .update((draft) => {
         const parent = setting.path.slice(0, -1).reduce<Record<string, unknown>>((result, key) => {

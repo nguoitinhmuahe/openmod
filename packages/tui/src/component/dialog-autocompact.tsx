@@ -144,6 +144,8 @@ export const autoCompactSettings = [
     values: [false, true],
     labels: ["off", "on"],
     keywords: ["compaction", "compact", "summarize", "context window"],
+    // The compaction engine reads the server's config, never the window's file.
+    server: true,
   },
   {
     title: "Auto compact at",
@@ -154,5 +156,6 @@ export const autoCompactSettings = [
     values: THRESHOLDS.map(FREE_FOR),
     labels: THRESHOLDS.map((full) => (full === 70 ? `${full}% full (default)` : `${full}% full`)),
     keywords: ["compaction", "threshold", "percent", "full", "buffer"],
+    server: true,
   },
 ]

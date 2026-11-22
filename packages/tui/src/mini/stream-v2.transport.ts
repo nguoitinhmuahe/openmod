@@ -1377,12 +1377,12 @@ export async function createSessionTransport(input: StreamInput): Promise<Sessio
       return
     }
     if (event.type === "session.step.ended") {
-      const total =
-        event.data.tokens.input +
-        event.data.tokens.output +
-        event.data.tokens.reasoning +
-        event.data.tokens.cache.read +
-        event.data.tokens.cache.write
+      // What the request occupies is its input and the output it produced. `cache.read`
+      // is the part of that input served from the provider's cache — it is already
+      // counted in `input`, and adding it again inflated the reading several times over:
+      // a session with 6k of input and 42k of cache read showed 48k, and the bar said
+      // 80% while the compaction engine saw a few percent of the window.
+      const total = event.data.tokens.input + event.data.tokens.output + event.data.tokens.reasoning
       const limit = state.stepModel ? input.contextLimit?.(state.stepModel) : undefined
       state.stepModel = undefined
       if (!showTools()) flushQuietText(event.data.assistantMessageID)

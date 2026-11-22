@@ -1,13 +1,15 @@
 export * as Telegram from "./telegram.js"
 
 
-import { Context, Effect, Layer, Scope } from "effect"
+import { Context, Effect, Exit, Layer, RcMap, Scope } from "effect"
 import { Node, makeGlobalNode } from "@opencode/util/effect/app-node"
 import { LayerNode } from "@opencode/util/effect/layer-node"
 import { Global } from "@opencode/util/global"
 import { SessionEvent } from "@opencode/schema/session-event"
 import { Bus } from "./bus.js"
 import { Session } from "./session.js"
+import { Permission } from "./permission.js"
+import { LocationServiceMap } from "./location-service-map.js"
 import { createBot } from "./telegram/bot.js"
 import { createBridge } from "./telegram/bridge.js"
 import { EDIT_INTERVAL_MS, MAX_MESSAGE_CHARS, add, dueAt, emptyLive, hasText, published, type Live } from "./telegram/notify.js"
@@ -47,6 +49,9 @@ const COMMANDS = [
   { name: "projects", description: "the projects opencode knows" },
   { name: "usage", description: "token use across sessions" },
   { name: "debug", description: "paths, database size, plugin count" },
+  { name: "yes", description: "allow a permission once: /yes <id>" },
+  { name: "always", description: "allow a permission from now on: /always <id>" },
+  { name: "no", description: "refuse a permission: /no <id>" },
 ]
 
 // There is deliberately no dynamic menu here. `Command.Service` is a location node
@@ -68,6 +73,33 @@ export const layer = Layer.effect(
     const global = yield* Global.Service
     const sessions = yield* Session.Service
     const bus = yield* Bus.Service
+    // Permissions are a location service and this bridge is global, so a request is
+    // answered by resolving its own location's Permission through this map. The map is
+    // how every other global node reaches a location's services.
+    const locations = yield* LocationServiceMap.Service
+
+    /**
+     * Answers a permission by id, in whichever location owns it.
+     *
+     * `Permission` is a location service and this bridge is global, so the request is
+     * handed to each open location in turn until one knows the id. Ids are unique
+     * across the app, so at most one can, and the persisted request is what that
+     * location's `Permission.Service` looks up.
+     */
+    const replyPermission = (answer: { requestID: string; reply: "once" | "always" | "reject" }) =>
+      Effect.gen(function* () {
+        const refs = Array.from(yield* RcMap.keys(locations.rcMap))
+        const attempt = (ref: (typeof refs)[number]) =>
+          Effect.gen(function* () {
+            const permission = yield* Permission.Service
+            yield* permission.reply({ requestID: answer.requestID as never, reply: answer.reply })
+          }).pipe(Effect.provide(Layer.unwrap(Effect.map(LocationServiceMap.Service, (map) => map.get(ref)))))
+        for (const ref of refs) {
+          const result = yield* attempt(ref).pipe(Effect.exit)
+          if (Exit.isSuccess(result)) return
+        }
+        return yield* Effect.fail(new Error(`no location knows permission ${answer.requestID}`))
+      })
 
     const serve = Effect.gen(function* () {
       const path = pathFor(global.data)
@@ -99,6 +131,12 @@ export const layer = Layer.effect(
       }
 
       const bridge = createBridge({
+        permissions: {
+          // The location map is provided here rather than inside `replyPermission`,
+          // so that function stays a plain effect over the map it was built with.
+          reply: (answer) =>
+            Effect.runPromise(replyPermission(answer).pipe(Effect.provideService(LocationServiceMap.Service, locations))),
+        },
         bot,
         sessions: {
           prompt: async ({ sessionID, text }) => {
@@ -304,7 +342,27 @@ export const layer = Layer.effect(
             append(sessionID, "\n\n")
             return
           }
-          if (event.type === SessionEvent.Tool.Input.Started.type) {
+          if (event.type === Permission.Event.Asked.type) {
+            const asked = event.data as {
+              sessionID?: string
+              id?: string
+              action?: string
+              resources?: readonly string[]
+              message?: string
+            }
+            if (asked.sessionID === undefined || asked.id === undefined) return
+            void bridge
+              .notify({
+                kind: "permission",
+                sessionID: asked.sessionID,
+                title: "",
+                requestID: asked.id,
+                action: asked.action ?? "wants to act",
+                resources: asked.resources ?? [],
+                ...(asked.message === undefined ? {} : { message: asked.message }),
+              })
+              .catch((error) => Effect.runSync(Effect.logError("telegram notify failed", { error: String(error) })))
+          } else if (event.type === SessionEvent.Tool.Input.Started.type) {
             const tool = data.name ?? "a tool"
             // A tool call interrupts the reply, so the buffered text is published
             // before the call is announced, in that order.
@@ -395,5 +453,5 @@ export const layer = Layer.effect(
 export const node: LayerNode.Provider<Service, never, typeof Node.tags.values.global> = makeGlobalNode({
   service: Service,
   layer,
-  deps: [Bus.node, Session.node, Global.node],
+  deps: [Bus.node, Session.node, Global.node, LocationServiceMap.node],
 })

@@ -15,6 +15,23 @@ export type SessionPort = {
   readonly title: (sessionID: string) => Promise<string>
 }
 
+/**
+ * Answers a permission request the app is waiting on.
+ *
+ * A request left unanswered stops the run — the window shows a dialog and nothing
+ * happens until someone presses a key. This is that keypress, from the chat, so a
+ * run does not sit blocked because its owner walked away from the desk.
+ */
+export type PermissionPort = {
+  /**
+   * Answers a request by id.
+   *
+   * No session is needed: a request id is unique across the app, and `Permission.reply`
+   * takes only the id and the answer.
+   */
+  readonly reply: (input: { requestID: string; reply: "once" | "always" | "reject" }) => Promise<void>
+}
+
 export type BotPort = {
   readonly sendMessage: (input: { chatID: number; text: string; replyTo?: number }) => Promise<number>
 }
@@ -26,6 +43,14 @@ export type Bridge = {
   readonly receive: (input: { chatID: number; text: string; replyTo?: number }) => Promise<void>
   /** How many messages were sent, for tests and for the pause/resume notices. */
   readonly sent: () => number
+}
+
+/** The three words that answer a permission, and what each means. */
+function permissionAnswer(name: string): "once" | "always" | "reject" | undefined {
+  if (name === "yes") return "once"
+  if (name === "always") return "always"
+  if (name === "no") return "reject"
+  return undefined
 }
 
 /** How many sent messages stay routable. Telegram ids only grow, so dropping the
@@ -41,6 +66,8 @@ export function createBridge(input: {
   readonly commands: ReadonlyArray<{ readonly name: string; readonly description: string }>
   /** Runs a command the user typed in Telegram. `rest` is everything after the name. */
   readonly runCommand: (input: { name: string; rest: string; chatID: number }) => Promise<string>
+  /** Answers a permission the app is blocked on. Absent when nothing can answer. */
+  readonly permissions?: PermissionPort
 }): Bridge {
   // The messages this bridge sent, so a reply finds its session. Module state would
   // leak between bridges; this map is per bridge.
@@ -87,6 +114,29 @@ export function createBridge(input: {
       const resolved = classify(incoming.text, incoming.replyTo, routes)
       switch (resolved.kind) {
         case "command": {
+          // An answer to a permission names the request, not a session: the request id
+          // is what the app is waiting on. `/yes 3` and `/always 3` allow it, `/no 3`
+          // refuses it.
+          const reply = permissionAnswer(resolved.name)
+          if (reply !== undefined) {
+            const requestID = resolved.rest.trim()
+            if (requestID === "") {
+              await send(incoming.chatID, `Which request? /${resolved.name} <id> — the id is in the message asking.`, incoming.replyTo)
+              return
+            }
+            if (input.permissions === undefined) {
+              await send(incoming.chatID, "Nothing here can answer permissions.", incoming.replyTo)
+              return
+            }
+            try {
+              await input.permissions.reply({ requestID, reply })
+              await send(incoming.chatID, `Answered ${requestID}: ${reply}.`, incoming.replyTo)
+            } catch (error) {
+              await send(incoming.chatID, `Could not answer ${requestID}: ${String(error)}`, incoming.replyTo)
+            }
+            return
+          }
+
           const known = input.commands.some((command) => command.name === resolved.name)
           const answer = known
             ? await input.runCommand({ name: resolved.name, rest: resolved.rest, chatID: incoming.chatID })

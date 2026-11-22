@@ -176,3 +176,75 @@ describe("a streamed reply", () => {
     expect(dueAt(live, EDIT_INTERVAL_MS * 5)).toBe(false)
   })
 })
+
+describe("a permission waiting to be answered", () => {
+  const withPermissions = () => {
+    const answered: Array<{ requestID: string; reply: string }> = []
+    const bot = fakeBot()
+    const sessions = fakeSessions()
+    const bridge = createBridge({
+      bot: bot.port,
+      sessions: sessions.port,
+      chatID: 42,
+      commands,
+      runCommand: async () => "ran",
+      permissions: {
+        reply: async (input) => {
+          answered.push(input)
+        },
+      },
+    })
+    return { answered, bot, bridge }
+  }
+
+  test("the message names the request and says how to answer it", async () => {
+    const { bot, bridge } = withPermissions()
+    await bridge.notify({
+      kind: "permission",
+      sessionID: "ses_alpha",
+      title: "",
+      requestID: "req_7",
+      action: "wants to run",
+      resources: ["rm -rf build"],
+    })
+    const text = bot.sent[0].text
+    expect(text).toContain("waiting for you")
+    expect(text).toContain("rm -rf build")
+    expect(text).toContain("/yes req_7")
+  })
+
+  test("every answer reaches the app", async () => {
+    const { answered, bridge } = withPermissions()
+    await bridge.receive({ chatID: 42, text: "/yes req_7" })
+    await bridge.receive({ chatID: 42, text: "/always req_7" })
+    await bridge.receive({ chatID: 42, text: "/no req_7" })
+    expect(answered).toEqual([
+      { requestID: "req_7", reply: "once" },
+      { requestID: "req_7", reply: "always" },
+      { requestID: "req_7", reply: "reject" },
+    ])
+  })
+
+  test("an answer without a request id asks which one rather than guessing", async () => {
+    const { answered, bot, bridge } = withPermissions()
+    await bridge.receive({ chatID: 42, text: "/yes" })
+    expect(answered.length).toBe(0)
+    expect(bot.sent[0].text).toContain("Which request?")
+  })
+
+  test("a permission is announced even after a run has made many tool calls", async () => {
+    // A tool call is dropped after the first, but a permission is something the user
+    // must see — it is what the run is blocked on.
+    const { bot, bridge } = withPermissions()
+    for (let i = 0; i < 5; i++) await bridge.notify({ kind: "tool", sessionID: "ses_alpha", title: "", tool: "read" })
+    await bridge.notify({
+      kind: "permission",
+      sessionID: "ses_alpha",
+      title: "",
+      requestID: "req_9",
+      action: "wants to write",
+      resources: ["src/a.ts"],
+    })
+    expect(bot.sent.at(-1)?.text).toContain("/yes req_9")
+  })
+})

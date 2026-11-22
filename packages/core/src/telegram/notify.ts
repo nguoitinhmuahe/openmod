@@ -13,6 +13,21 @@ export type Activity =
   | { readonly kind: "error"; readonly sessionID: string; readonly title: string; readonly message: string }
   | { readonly kind: "finished"; readonly sessionID: string; readonly title: string; readonly summary: string }
   | { readonly kind: "paused"; readonly sessionID: string; readonly title: string; readonly reason: string }
+  /**
+   * The run has stopped and is waiting for the user to allow or refuse something.
+   *
+   * `requestID` is what an answer names, and `options` is what may be answered —
+   * a permission may be allowed once, always, or refused.
+   */
+  | {
+      readonly kind: "permission"
+      readonly sessionID: string
+      readonly title: string
+      readonly requestID: string
+      readonly action: string
+      readonly resources: readonly string[]
+      readonly message?: string
+    }
 
 /** One line, and only what the user has to act on. */
 export function render(activity: Activity): string {
@@ -30,6 +45,17 @@ export function render(activity: Activity): string {
       return `${head} — ${activity.summary}`
     case "paused":
       return `${head} — paused: ${activity.reason}`
+    case "permission": {
+      const what = activity.resources.length > 0 ? activity.resources.join(", ") : activity.action
+      return [
+        `${head} — waiting for you`,
+        ``,
+        `${activity.action}: ${what}`,
+        ...(activity.message === undefined ? [] : ["", activity.message]),
+        ``,
+        `Answer with /yes ${activity.requestID}, /always ${activity.requestID} or /no ${activity.requestID}`,
+      ].join("\n")
+    }
   }
 }
 
@@ -43,6 +69,8 @@ export function render(activity: Activity): string {
  */
 export function shouldSend(activity: Activity, alreadySentForSession: number): boolean {
   if (activity.kind === "tool") return alreadySentForSession === 0
+  // Everything else — a permission, a failure, a finish — is something the user has
+  // to see, and is never suppressed by how many tool calls came before it.
   return true
 }
 

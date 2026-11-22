@@ -1,5 +1,5 @@
-import { createSignal } from "solid-js"
-import { useConfig } from "../config"
+import { createEffect, createSignal } from "solid-js"
+import { useClient } from "../context/client"
 import { useLocal } from "../context/local"
 import { useDialog } from "../ui/dialog"
 import { DialogAlert } from "../ui/dialog-alert"
@@ -29,12 +29,26 @@ const FULL_FROM = (free: string) => {
 const THRESHOLDS = [50, 60, 70, 80, 90, 95]
 
 export function AutoCompactSetting(props: { onClose: () => void }) {
-  const config = useConfig()
   const local = useLocal()
+  const client = useClient()
   const dialog = useDialog()
   const toast = useToast()
 
   const [busy, setBusy] = createSignal(false)
+  // The settings the server holds, read on open. This is the config the *model* runs
+  // on — not `cli.json`, which is the window's own file and which the server never
+  // reads.
+  const [settings, setSettings] = createSignal<{
+    provider?: Record<string, { models?: Record<string, { limit?: { context?: number } }> }>
+    compaction?: { auto?: boolean; buffer?: string }
+  }>({})
+
+  createEffect(() => {
+    void client.api.config
+      .get()
+      .then((info) => setSettings(info as never))
+      .catch(() => undefined)
+  })
 
   // `model.current()` rather than `model.selection()`: the selection is only defined
   // once a session is open, and this dialog is usually reached from the command
@@ -44,13 +58,7 @@ export function AutoCompactSetting(props: { onClose: () => void }) {
   const provider = () => model()?.providerID
   const modelID = () => model()?.modelID
 
-  // The TUI's own config type carries only the keys the interface reads, so the raw
-  // documents are reached through it rather than declared on it. `update` takes an
-  // untyped draft for the same reason.
-  const raw = () => config.data as unknown as {
-    provider?: Record<string, { models?: Record<string, { limit?: { context?: number } }> }>
-    compaction?: { auto?: boolean; buffer?: string }
-  }
+  const raw = settings
 
   // The window configured so far, which is what this dialog exists to correct: with no
   // entry the app falls back to a flat 200,000 it guessed.
@@ -81,13 +89,13 @@ export function AutoCompactSetting(props: { onClose: () => void }) {
     }
     setBusy(true)
     try {
-      await config.update((draft: Record<string, any>) => {
-        // The provider block may not exist yet in the user's file; build the path.
-        draft.provider ??= {}
-        draft.provider[p] ??= {}
-        draft.provider[p].models ??= {}
-        draft.provider[p].models[m] ??= {}
-        draft.provider[p].models[m].limit = { ...draft.provider[p].models[m].limit, context }
+      // Written through the server, which owns `opencode.json` — the config the model
+      // actually runs on. The window's own `config.update` writes `cli.json`, which the
+      // server never reads: a window set this way showed the new number and the run
+      // still used the old window, which is exactly what happened.
+      await client.api.config.update({
+        path: ["provider", p, "models", m, "limit", "context"],
+        value: context,
       })
       dialog.replace(() => (
         <DialogAlert

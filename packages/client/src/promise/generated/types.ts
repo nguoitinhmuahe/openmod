@@ -4934,7 +4934,13 @@ export type ConfigGetOutput = Array<ConfigEntry>
 
 export type ConfigShellsOutput = Array<ConfigShellOption>
 
-export type ExperimentalConfigUpdateInput = { readonly shell: string | null }
+/**
+ * A change to one setting, addressed by its path in the document.
+ *
+ * Generated from `Config.Patch`, which is `{ path, value }` — it was `{ shell }` while
+ * `Config.update` applied only that key.
+ */
+export type ExperimentalConfigUpdateInput = { readonly path: readonly string[]; readonly value: unknown }
 
 export type ExperimentalConfigUpdateOutput = void
 

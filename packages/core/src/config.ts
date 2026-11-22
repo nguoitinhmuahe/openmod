@@ -470,9 +470,30 @@ export const layer = (options?: Options) =>
         function* (patch: Patch) {
           const directory = initial.global ?? AbsolutePath.make(globalService.config)
           const candidates = ConfigDiscovery.names.map((name) => path.join(directory, name))
-          const filepath =
-            (yield* Effect.filter(candidates, fs.isFile)).at(-1) ?? path.join(directory, "opencode.jsonc")
-          const text = (yield* fs.readFileStringSafe(filepath)) ?? "{}\n"
+          const present = yield* Effect.filter(candidates, fs.isFile)
+
+          /**
+           * Which file the change belongs in.
+           *
+           * A machine may hold more than one config file — `opencode.json` and
+           * `opencode.jsonc` both count — and the later one wins key by key when they
+           * are merged. Writing to the last file unconditionally is what broke this: a
+           * setting for a provider that lives in `opencode.json` was written into
+           * `opencode.jsonc`, which had no such provider, so the merge produced an
+           * empty provider block in the winning file and the value was never read. The
+           * file already holding the top-level key is the one to edit; with no file
+           * holding it, the last present one is where a new key goes.
+           */
+          const top = patch.path[0]
+          let filepath: string | undefined
+          for (const candidate of present) {
+            const text = (yield* fs.readFileStringSafe(candidate)) ?? ""
+            const errors: ParseError[] = []
+            const parsed = parse(text, errors, { allowTrailingComma: true }) as Record<string, unknown> | undefined
+            if (errors.length === 0 && parsed !== undefined && top !== undefined && top in parsed) filepath = candidate
+          }
+          const chosen = filepath ?? present.at(-1) ?? path.join(directory, "opencode.jsonc")
+          const text = (yield* fs.readFileStringSafe(chosen)) ?? "{}\n"
           const updated = yield* Effect.try({
             try: () =>
               applyEdits(
@@ -483,7 +504,7 @@ export const layer = (options?: Options) =>
               ),
             catch: (cause) => new FSUtil.FileSystemError({ method: "config.update", cause }),
           })
-          yield* fs.writeWithDirs(filepath, updated.endsWith("\n") ? updated : `${updated}\n`)
+          yield* fs.writeWithDirs(chosen, updated.endsWith("\n") ? updated : `${updated}\n`)
           yield* requestReload
         },
         (effect) => updateLock.withPermit(effect),

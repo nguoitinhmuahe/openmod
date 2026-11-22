@@ -1791,7 +1791,9 @@ export function make(options: ClientOptions) {
             {
               method: "PATCH",
               path: `/api/experimental/config`,
-              body: { shell: input["shell"] },
+              // A path and a value, not `{ shell }`. Generated from `Config.Patch`;
+              // regenerate rather than editing here if the shape changes again.
+              body: { path: input["path"], value: input["value"] },
               successStatus: 204,
               declaredStatuses: [400, 401, 404],
               empty: true,

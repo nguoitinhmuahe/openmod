@@ -10,6 +10,7 @@ import { Bus } from "./bus.js"
 import { Session } from "./session.js"
 import { createBot } from "./telegram/bot.js"
 import { createBridge } from "./telegram/bridge.js"
+import { EDIT_INTERVAL_MS, MAX_MESSAGE_CHARS, add, dueAt, emptyLive, hasText, published, type Live } from "./telegram/notify.js"
 import { load, paired, pathFor } from "./telegram/token.js"
 
 // The Telegram bridge, as a global service.
@@ -227,6 +228,56 @@ export const layer = Layer.effect(
       // — the feed the TUI reads — uses `listen` for that reason, and this bridge wants
       // the same unfiltered view. Relying on the global-node placement to keep Location
       // out of the subscriber's context was an assumption, not a guarantee.
+      // What the window shows, the chat shows: the run's reasoning and its reply, in
+      // one message that grows. A fragment per message is thousands of messages, which
+      // Telegram rate-limits inside a second — so the text is buffered and the message
+      // is edited at most once per EDIT_INTERVAL_MS, which is also what `notify.ts`
+      // was written around.
+      const live = new Map<string, { state: Live; messageID?: number; timer?: ReturnType<typeof setTimeout> }>()
+
+      const flush = (sessionID: string) => {
+        const held = live.get(sessionID)
+        if (held === undefined || !hasText(held.state)) return
+        const text = held.state.body.slice(-MAX_MESSAGE_CHARS)
+        void (async () => {
+          try {
+            if (held.messageID === undefined) {
+              held.messageID = await bot.sendMessage({ chatID: stored.chatID, text })
+            } else {
+              await bot.editMessageText({ chatID: stored.chatID, messageID: held.messageID, text })
+            }
+            held.state = published(held.state, Date.now())
+          } catch (error) {
+            // An edit can fail because the text did not change, which is not worth
+            // reporting; anything else is logged so a broken bridge is visible.
+            Effect.runSync(Effect.logWarning("telegram stream edit failed", { sessionID, error: String(error) }))
+          }
+        })()
+      }
+
+      const append = (sessionID: string, fragment: string) => {
+        const held = live.get(sessionID) ?? { state: emptyLive() }
+        held.state = add(held.state, fragment)
+        live.set(sessionID, held)
+        // One timer per session: the run is paced, not the fragments.
+        if (held.timer === undefined)
+          held.timer = setTimeout(() => {
+            held.timer = undefined
+            if (dueAt(held.state, Date.now())) flush(sessionID)
+          }, EDIT_INTERVAL_MS)
+      }
+
+      const finishLive = (sessionID: string) => {
+        const held = live.get(sessionID)
+        live.delete(sessionID)
+        if (held?.messageID !== undefined) {
+          // The last fragment may have landed after the final flush.
+          const text = held.state.body.slice(-MAX_MESSAGE_CHARS)
+          if (hasText(held.state))
+            void bot.editMessageText({ chatID: stored.chatID, messageID: held.messageID, text }).catch(() => undefined)
+        }
+      }
+
       yield* bus.listen((event) =>
         Effect.sync(() => {
           const data = event.data as {
@@ -234,11 +285,33 @@ export const layer = Layer.effect(
             name?: string
             error?: { message?: string }
             reason?: string
+            delta?: string
+            text?: string
           }
           const sessionID = data?.sessionID
           if (sessionID === undefined) return
+          if (event.type === SessionEvent.Text.Delta.type || event.type === SessionEvent.Reasoning.Delta.type) {
+            if (typeof data.delta === "string") append(sessionID, data.delta)
+            return
+          }
+          if (event.type === SessionEvent.Reasoning.Ended.type) {
+            // The reasoning block is done; a rule sets it apart from the reply that
+            // follows, which is how the window reads it too.
+            append(sessionID, "\n\n")
+            return
+          }
+          if (event.type === SessionEvent.Text.Ended.type) {
+            append(sessionID, "\n\n")
+            return
+          }
           if (event.type === SessionEvent.Tool.Input.Started.type) {
             const tool = data.name ?? "a tool"
+            // A tool call interrupts the reply, so the buffered text is published
+            // before the call is announced, in that order.
+            if (hasText(live.get(sessionID)?.state ?? emptyLive())) {
+              append(sessionID, `\n\n▸ ${tool}\n\n`)
+              flush(sessionID)
+            }
             void bridge
               .notify({ kind: "tool", sessionID, title: "", tool })
               .then(() => Effect.runSync(Effect.logInfo("telegram notified a tool", { tool, sessionID })))
@@ -248,14 +321,17 @@ export const layer = Layer.effect(
             // tool calls to keep them from becoming one message each, and that count is
             // only cleared by a finishing notice. Without this the first tool call of a
             // session silenced every later one, for the life of the process.
+            finishLive(sessionID)
             void bridge
               .notify({ kind: "finished", sessionID, title: "", summary: "done" })
               .catch((error) => Effect.runSync(Effect.logError("telegram notify failed", { error: String(error) })))
           } else if (event.type === SessionEvent.Execution.Failed.type) {
+            finishLive(sessionID)
             void bridge
               .notify({ kind: "error", sessionID, title: "", message: data.error?.message ?? "failed" })
               .catch(() => undefined)
           } else if (event.type === SessionEvent.Execution.Interrupted.type && data.reason === "user") {
+            finishLive(sessionID)
             void bridge
               .notify({ kind: "paused", sessionID, title: "", reason: "you stopped it" })
               .catch(() => undefined)

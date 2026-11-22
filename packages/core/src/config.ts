@@ -477,7 +477,7 @@ export const layer = (options?: Options) =>
             try: () =>
               applyEdits(
                 text,
-                modify(text, ["shell"], patch.shell ?? undefined, {
+                modify(text, [...patch.path], patch.value, {
                   formattingOptions: { tabSize: 2, insertSpaces: true },
                 }),
               ),

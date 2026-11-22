@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { createBridge } from "@opencode/core/telegram/bridge"
+import { EDIT_INTERVAL_MS, add, dueAt, emptyLive, hasText, published } from "@opencode/core/telegram/notify"
 
 /** A fake bot that records what it sent and hands back increasing ids. */
 function fakeBot() {
@@ -154,5 +155,24 @@ describe("receive", () => {
     await bridge.receive({ chatID: 42, text: "/status", replyTo: 100 })
     // The command is handled, and nothing is typed into the session.
     expect(sessions.prompted.length).toBe(0)
+  })
+})
+
+describe("a streamed reply", () => {
+  test("fragments of one run become one message, edited as it grows", async () => {
+    // A message per fragment is thousands of messages and Telegram rate-limits edits
+    // within seconds, so the bridge buffers and edits. The test drives the buffer the
+    // way the bridge's own event handler does.
+    let live = emptyLive()
+    live = add(live, "Để tao ")
+    live = add(live, "đọc file.")
+    expect(hasText(live)).toBe(true)
+    expect(live.body).toBe("Để tao đọc file.")
+
+    // Not due until the interval passes, however many fragments arrived.
+    expect(dueAt(live, 0)).toBe(false)
+    expect(dueAt(live, EDIT_INTERVAL_MS)).toBe(true)
+    live = published(live, EDIT_INTERVAL_MS)
+    expect(dueAt(live, EDIT_INTERVAL_MS * 5)).toBe(false)
   })
 })

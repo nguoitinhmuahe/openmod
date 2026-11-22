@@ -1,5 +1,17 @@
 import { describe, expect, test } from "bun:test"
-import { finishedSummary, render, shouldSend, type Activity } from "@opencode/core/telegram/notify"
+import {
+  EDIT_INTERVAL_MS,
+  MAX_MESSAGE_CHARS,
+  add,
+  dueAt,
+  emptyLive,
+  finishedSummary,
+  hasText,
+  published,
+  render,
+  shouldSend,
+  type Activity,
+} from "@opencode/core/telegram/notify"
 
 const base = { sessionID: "ses_one", title: "session m" } as const
 
@@ -52,5 +64,54 @@ describe("finishedSummary", () => {
 
   test("files alone is enough", () => {
     expect(finishedSummary({ tools: 0, files: 2 })).toBe("done — 2 files")
+  })
+})
+
+describe("the live buffer", () => {
+  test("fragments accumulate into one message body", () => {
+    let live = emptyLive()
+    live = add(live, "Để tao ")
+    live = add(live, "đọc file ")
+    live = add(live, "trước.")
+    expect(live.body).toBe("Để tao đọc file trước.")
+  })
+
+  test("nothing is published until the interval has passed", () => {
+    // One message per fragment is thousands of messages, and Telegram rate-limits
+    // edits within seconds — the interval is what keeps the stream to one message.
+    const live = add(emptyLive(), "hello")
+    expect(dueAt(live, 0)).toBe(false)
+    expect(dueAt(live, EDIT_INTERVAL_MS - 1)).toBe(false)
+    expect(dueAt(live, EDIT_INTERVAL_MS)).toBe(true)
+  })
+
+  test("an unchanged buffer is never republished", () => {
+    const live = published(add(emptyLive(), "hello"), 0)
+    expect(dueAt(live, EDIT_INTERVAL_MS * 10)).toBe(false)
+  })
+
+  test("a fragment after publishing makes it due again", () => {
+    let live = published(add(emptyLive(), "hello"), 0)
+    live = add(live, " again")
+    expect(dueAt(live, EDIT_INTERVAL_MS * 10)).toBe(true)
+  })
+
+  test("a long run keeps the newest text and says it was clipped", () => {
+    let live = emptyLive()
+    for (let i = 0; i < 500; i++) live = add(live, "x".repeat(20))
+    expect(live.body.length).toBeLessThanOrEqual(MAX_MESSAGE_CHARS)
+    expect(live.body.startsWith("…")).toBe(true)
+  })
+
+  test("the end of the buffer is the newest text", () => {
+    let live = add(emptyLive(), "a".repeat(MAX_MESSAGE_CHARS))
+    live = add(live, "THE-END")
+    expect(live.body.endsWith("THE-END")).toBe(true)
+  })
+
+  test("an empty buffer has nothing to show", () => {
+    expect(hasText(emptyLive())).toBe(false)
+    expect(hasText(add(emptyLive(), "   "))).toBe(false)
+    expect(hasText(add(emptyLive(), "x"))).toBe(true)
   })
 })

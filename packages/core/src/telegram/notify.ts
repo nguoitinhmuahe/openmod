@@ -58,3 +58,56 @@ export function finishedSummary(input: { readonly tools: number; readonly files:
   if (input.tools > 0) parts.push(`${input.tools} tool call${input.tools === 1 ? "" : "s"}`)
   return parts.length === 0 ? "done" : `done — ${parts.join(", ")}`
 }
+
+// --- the live view -------------------------------------------------------
+//
+// A run's text arrives as fragments, one event each. Sending them as they come is
+// thousands of messages, which Telegram rate-limits inside a second and which no one
+// can read. What the window does is redraw one region; what the chat does is edit one
+// message. Both show the run growing, and neither is a flood.
+
+/** How often the buffered text is published. Fast enough to look live, slow enough
+ * that Telegram's edit limit is never approached. */
+export const EDIT_INTERVAL_MS = 1_200
+
+/** The most text one message may hold. Telegram refuses anything longer. */
+export const MAX_MESSAGE_CHARS = 4_000
+
+export type Live = {
+  /** Text and reasoning so far, in the order they arrived. */
+  readonly body: string
+  /** The last time the buffer was published, in epoch milliseconds. */
+  readonly publishedAt: number
+  /** Whether anything has changed since that publish. */
+  readonly dirty: boolean
+}
+
+export const emptyLive = (): Live => ({ body: "", publishedAt: 0, dirty: false })
+
+/**
+ * add appends a fragment, trimming from the front when the message would be too long.
+ *
+ * The newest text is the part worth reading — a long run has already had its earlier
+ * paragraphs — so the head is what goes when the limit is reached, and the message
+ * says so rather than silently starting mid-sentence.
+ */
+export function add(live: Live, fragment: string): Live {
+  const body = live.body + fragment
+  const clipped =
+    body.length <= MAX_MESSAGE_CHARS
+      ? body
+      : `…\n${body.slice(body.length - (MAX_MESSAGE_CHARS - 2))}`
+  return { ...live, body: clipped, dirty: true }
+}
+
+/** Whether the buffer should be published now: something changed, and long enough since. */
+export function dueAt(live: Live, now: number, interval = EDIT_INTERVAL_MS): boolean {
+  if (!live.dirty) return false
+  return now - live.publishedAt >= interval
+}
+
+/** Marks the buffer as published as of `now`. */
+export const published = (live: Live, now: number): Live => ({ ...live, publishedAt: now, dirty: false })
+
+/** Whether the buffer holds anything worth showing. */
+export const hasText = (live: Live): boolean => live.body.trim().length > 0

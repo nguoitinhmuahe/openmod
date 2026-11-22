@@ -25,6 +25,14 @@ export type Bot = {
   readonly getUpdates: (offset: number, signal?: AbortSignal) => Promise<Update[]>
   /** Sends a message and returns its id, so a reply to it can be routed back. */
   readonly sendMessage: (input: { chatID: number; text: string; replyTo?: number }) => Promise<number>
+  /**
+   * Replaces the text of a message already sent.
+   *
+   * This is what keeps a streamed reply to one message instead of a thousand: the
+   * chat shows the run growing the way the window does, and Telegram sees a handful
+   * of edits rather than a message per token — which it rate-limits within seconds.
+   */
+  readonly editMessageText: (input: { chatID: number; messageID: number; text: string }) => Promise<void>
   /** Publishes the slash menu Telegram shows above the keyboard. */
   readonly setMyCommands: (commands: ReadonlyArray<BotCommand>) => Promise<void>
   /** Confirms the token, returning the bot's username. Throws when the token is wrong. */
@@ -87,6 +95,13 @@ export function createBot(options: Options): Bot {
         ...(input.replyTo === undefined ? {} : { reply_to_message_id: input.replyTo }),
       })
       return sent.message_id
+    },
+    async editMessageText(input) {
+      await call("editMessageText", {
+        chat_id: input.chatID,
+        message_id: input.messageID,
+        text: input.text,
+      })
     },
     async setMyCommands(commands) {
       await call("setMyCommands", { commands })

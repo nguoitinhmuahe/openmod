@@ -1990,7 +1990,12 @@ const adaptGroupConfig = (raw: RawClient["server.config"]) => ({
 
 const EndpointExperimentalConfigUpdate = (raw: RawClient["server.config"]) => (input: ExperimentalConfigUpdateInput) =>
   preserveEffect<ExperimentalConfigUpdateOutput>()(
-    raw["config.update"]({ payload: { shell: input["shell"] } }).pipe(Effect.mapError(mapClientError)),
+    // The payload is a path and a value, not `{ shell }`: `Config.Patch` addresses any
+    // setting in the document now. This file is generated from the schema — regenerate
+    // it rather than editing here if the shape changes again.
+    raw["config.update"]({ payload: { path: input["path"], value: input["value"] } }).pipe(
+      Effect.mapError(mapClientError),
+    ),
   )
 
 const adaptGroupExperimentalConfig = (raw: RawClient["server.config"]) => ({

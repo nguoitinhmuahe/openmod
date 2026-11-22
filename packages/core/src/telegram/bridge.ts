@@ -6,13 +6,23 @@
 // knows Telegram exists.
 
 import { classify, type Route } from "./route.js"
-import { render, shouldSend, type Activity } from "./notify.js"
+import { parseFormAnswer, render, shouldSend, type Activity, type FormField } from "./notify.js"
 
 export type SessionPort = {
   /** Sends text into a session, as if the user typed it. */
   readonly prompt: (input: { sessionID: string; text: string }) => Promise<void>
   /** The session's title, for the message head. Empty when it has none yet. */
   readonly title: (sessionID: string) => Promise<string>
+}
+
+/**
+ * Answers a form the app is waiting on.
+ *
+ * The same situation as a permission — the run is stopped until someone decides — but
+ * the answer is a set of values rather than yes or no.
+ */
+export type FormPort = {
+  readonly reply: (input: { readonly id: string; readonly answer: Record<string, unknown> }) => Promise<void>
 }
 
 /**
@@ -68,6 +78,8 @@ export function createBridge(input: {
   readonly runCommand: (input: { name: string; rest: string; chatID: number }) => Promise<string>
   /** Answers a permission the app is blocked on. Absent when nothing can answer. */
   readonly permissions?: PermissionPort
+  /** Answers a form the app is blocked on. Absent when nothing can answer. */
+  readonly forms?: FormPort
 }): Bridge {
   // The messages this bridge sent, so a reply finds its session. Module state would
   // leak between bridges; this map is per bridge.
@@ -75,6 +87,11 @@ export function createBridge(input: {
   // One tally per session per run: the first tool call announces a run, the rest are
   // noise. Cleared when the run ends.
   const announced = new Map<string, number>()
+  // The fields of each unanswered form, keyed by form id. They are what the answer is
+  // typed against — a bare "3" is a number for a number field and a string otherwise —
+  // and they were announced, so remembering them here is what makes `/answer id 3`
+  // mean the right thing.
+  const pendingForms = new Map<string, readonly FormField[]>()
   let count = 0
 
   const send = async (chatID: number, text: string, replyTo?: number) => {
@@ -90,6 +107,9 @@ export function createBridge(input: {
       const already = announced.get(activity.sessionID) ?? 0
       if (!shouldSend(activity, already)) return
 
+      // A form's fields are remembered so its answer can be typed against them: a bare
+      // "3" is a number for a number field and a string otherwise.
+      if (activity.kind === "form") pendingForms.set(activity.formID, activity.fields)
       if (activity.kind === "tool") announced.set(activity.sessionID, already + 1)
       else if (activity.kind === "started") announced.set(activity.sessionID, 0)
       else if (activity.kind === "finished" || activity.kind === "paused") announced.delete(activity.sessionID)
@@ -117,6 +137,33 @@ export function createBridge(input: {
           // An answer to a permission names the request, not a session: the request id
           // is what the app is waiting on. `/yes 3` and `/always 3` allow it, `/no 3`
           // refuses it.
+          if (resolved.name === "answer") {
+            const [id, ...rest] = resolved.rest.trim().split(/\s+/)
+            if (id === undefined || id === "") {
+              await send(incoming.chatID, "Which form? /answer <id> key=value ...", incoming.replyTo)
+              return
+            }
+            if (input.forms === undefined) {
+              await send(incoming.chatID, "Nothing here can answer forms.", incoming.replyTo)
+              return
+            }
+            // The fields are needed to type the values, and they were sent with the
+            // question, so they are looked up from what this bridge last announced.
+            const parsed = parseFormAnswer(pendingForms.get(id) ?? [], rest.join(" "))
+            if ("error" in parsed) {
+              await send(incoming.chatID, parsed.error, incoming.replyTo)
+              return
+            }
+            try {
+              await input.forms.reply({ id, answer: parsed.answer })
+              pendingForms.delete(id)
+              await send(incoming.chatID, `Answered ${id}.`, incoming.replyTo)
+            } catch (error) {
+              await send(incoming.chatID, `Could not answer ${id}: ${String(error)}`, incoming.replyTo)
+            }
+            return
+          }
+
           const reply = permissionAnswer(resolved.name)
           if (reply !== undefined) {
             const requestID = resolved.rest.trim()

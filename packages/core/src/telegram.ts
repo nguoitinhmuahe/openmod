@@ -9,10 +9,11 @@ import { SessionEvent } from "@opencode/schema/session-event"
 import { Bus } from "./bus.js"
 import { Session } from "./session.js"
 import { Permission } from "./permission.js"
+import { Form } from "./form.js"
 import { LocationServiceMap } from "./location-service-map.js"
 import { createBot } from "./telegram/bot.js"
 import { createBridge } from "./telegram/bridge.js"
-import { EDIT_INTERVAL_MS, MAX_MESSAGE_CHARS, add, dueAt, emptyLive, hasText, published, type Live } from "./telegram/notify.js"
+import { EDIT_INTERVAL_MS, MAX_MESSAGE_CHARS, add, dueAt, emptyLive, hasText, published, type FormField, type Live } from "./telegram/notify.js"
 import { load, paired, pathFor } from "./telegram/token.js"
 
 // The Telegram bridge, as a global service.
@@ -52,6 +53,7 @@ const COMMANDS = [
   { name: "yes", description: "allow a permission once: /yes <id>" },
   { name: "always", description: "allow a permission from now on: /always <id>" },
   { name: "no", description: "refuse a permission: /no <id>" },
+  { name: "answer", description: "answer a question the run is waiting on: /answer <id> key=value" },
 ]
 
 // There is deliberately no dynamic menu here. `Command.Service` is a location node
@@ -86,6 +88,21 @@ export const layer = Layer.effect(
      * across the app, so at most one can, and the persisted request is what that
      * location's `Permission.Service` looks up.
      */
+    const replyForm = (answer: { id: string; answer: Record<string, unknown> }) =>
+      Effect.gen(function* () {
+        const refs = Array.from(yield* RcMap.keys(locations.rcMap))
+        for (const ref of refs) {
+          const result = yield* Effect.gen(function* () {
+            const form = yield* Form.Service
+            yield* form.reply({ id: answer.id as never, answer: answer.answer as never })
+          })
+            .pipe(Effect.provide(Layer.unwrap(Effect.map(LocationServiceMap.Service, (map) => map.get(ref)))))
+            .pipe(Effect.exit)
+          if (Exit.isSuccess(result)) return
+        }
+        return yield* Effect.fail(new Error(`no location knows form ${answer.id}`))
+      })
+
     const replyPermission = (answer: { requestID: string; reply: "once" | "always" | "reject" }) =>
       Effect.gen(function* () {
         const refs = Array.from(yield* RcMap.keys(locations.rcMap))
@@ -131,6 +148,10 @@ export const layer = Layer.effect(
       }
 
       const bridge = createBridge({
+        forms: {
+          reply: (answer) =>
+            Effect.runPromise(replyForm(answer).pipe(Effect.provideService(LocationServiceMap.Service, locations))),
+        },
         permissions: {
           // The location map is provided here rather than inside `replyPermission`,
           // so that function stays a plain effect over the map it was built with.
@@ -342,7 +363,22 @@ export const layer = Layer.effect(
             append(sessionID, "\n\n")
             return
           }
-          if (event.type === Permission.Event.Asked.type) {
+          if (event.type === Form.Event.Created.type) {
+            const created = (event.data as { form?: { id?: string; sessionID?: string; title?: string; fields?: unknown[] } })
+              .form
+            if (created?.id === undefined || created.sessionID === undefined) return
+            const fields = (created.fields ?? []) as FormField[]
+            void bridge
+              .notify({
+                kind: "form",
+                sessionID: created.sessionID,
+                title: "",
+                formID: created.id,
+                formTitle: created.title ?? "A question",
+                fields,
+              })
+              .catch((error) => Effect.runSync(Effect.logError("telegram notify failed", { error: String(error) })))
+          } else if (event.type === Permission.Event.Asked.type) {
             const asked = event.data as {
               sessionID?: string
               id?: string

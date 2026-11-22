@@ -248,3 +248,51 @@ describe("a permission waiting to be answered", () => {
     expect(bot.sent.at(-1)?.text).toContain("/yes req_9")
   })
 })
+
+describe("a form waiting to be answered", () => {
+  const withForms = () => {
+    const answered: Array<{ id: string; answer: Record<string, unknown> }> = []
+    const bot = fakeBot()
+    const bridge = createBridge({
+      bot: bot.port,
+      sessions: fakeSessions().port,
+      chatID: 42,
+      commands,
+      runCommand: async () => "ran",
+      forms: { reply: async (input) => { answered.push(input) } },
+    })
+    return { answered, bot, bridge }
+  }
+
+  const form = {
+    kind: "form" as const,
+    sessionID: "ses_alpha",
+    title: "",
+    formID: "frm_1",
+    formTitle: "Where to commit",
+    fields: [{ key: "branch", type: "string", title: "Which branch", required: true }],
+  }
+
+  test("the question is sent with the command that answers it", async () => {
+    const { bot, bridge } = withForms()
+    await bridge.notify(form)
+    expect(bot.sent[0].text).toContain("Where to commit")
+    expect(bot.sent[0].text).toContain("/answer frm_1")
+  })
+
+  test("an answer reaches the app with its fields typed", async () => {
+    const { answered, bridge } = withForms()
+    await bridge.notify(form)
+    // The fields are remembered from the question, which is what makes a bare value
+    // mean the one field the form has.
+    await bridge.receive({ chatID: 42, text: "/answer frm_1 dev" })
+    expect(answered).toEqual([{ id: "frm_1", answer: { branch: "dev" } }])
+  })
+
+  test("an answer with no form id asks which one", async () => {
+    const { answered, bot, bridge } = withForms()
+    await bridge.receive({ chatID: 42, text: "/answer" })
+    expect(answered.length).toBe(0)
+    expect(bot.sent[0].text).toContain("Which form?")
+  })
+})

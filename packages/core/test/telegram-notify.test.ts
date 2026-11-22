@@ -7,8 +7,10 @@ import {
   emptyLive,
   finishedSummary,
   hasText,
+  parseFormAnswer,
   published,
   render,
+  renderForm,
   shouldSend,
   type Activity,
 } from "@opencode/core/telegram/notify"
@@ -113,5 +115,67 @@ describe("the live buffer", () => {
     expect(hasText(emptyLive())).toBe(false)
     expect(hasText(add(emptyLive(), "   "))).toBe(false)
     expect(hasText(add(emptyLive(), "x"))).toBe(true)
+  })
+})
+
+describe("a form", () => {
+  const fields = [
+    {
+      key: "branch",
+      type: "string",
+      title: "Which branch",
+      required: true,
+      options: [
+        { value: "main", label: "main" },
+        { value: "dev", label: "development" },
+      ],
+    },
+  ]
+
+  test("the question reads as fields with their options", () => {
+    const text = renderForm({ id: "frm_1", title: "Where to commit", fields })
+    expect(text).toContain("Where to commit")
+    expect(text).toContain("Which branch (required)")
+    expect(text).toContain("main — main")
+    expect(text).toContain("/answer frm_1 branch=...")
+  })
+
+  test("a single field may be answered with a bare value", () => {
+    // One field, one value: there is nothing else the word could mean.
+    expect(parseFormAnswer(fields, "dev")).toEqual({ answer: { branch: "dev" } })
+  })
+
+  test("key=value pairs are read against each field's type", () => {
+    const typed = [
+      { key: "count", type: "integer" },
+      { key: "force", type: "boolean" },
+      { key: "tags", type: "multiselect" },
+    ]
+    expect(parseFormAnswer(typed, "count=3 force=yes tags=a,b")).toEqual({
+      answer: { count: 3, force: true, tags: ["a", "b"] },
+    })
+  })
+
+  test("a bare value with several fields asks which field it is", () => {
+    const typed = [
+      { key: "a", type: "string" },
+      { key: "b", type: "string" },
+    ]
+    const parsed = parseFormAnswer(typed, "hello")
+    expect("error" in parsed).toBe(true)
+  })
+
+  test("an empty answer is refused", () => {
+    expect("error" in parseFormAnswer(fields, "   ")).toBe(true)
+  })
+
+  test("an unknown key is kept rather than dropped", () => {
+    // The form's own validation reports a bad answer better than this can.
+    expect(parseFormAnswer(fields, "other=1")).toEqual({ answer: { other: "1" } })
+  })
+
+  test("a non-numeric answer to a number field is passed through", () => {
+    const typed = [{ key: "count", type: "number" }]
+    expect(parseFormAnswer(typed, "count=abc")).toEqual({ answer: { count: "abc" } })
   })
 })

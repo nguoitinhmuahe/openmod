@@ -19,6 +19,15 @@ export type Activity =
    * `requestID` is what an answer names, and `options` is what may be answered —
    * a permission may be allowed once, always, or refused.
    */
+  /** The run is waiting on a form: fields to fill in before it can continue. */
+  | {
+      readonly kind: "form"
+      readonly sessionID: string
+      readonly title: string
+      readonly formID: string
+      readonly formTitle: string
+      readonly fields: readonly FormField[]
+    }
   | {
       readonly kind: "permission"
       readonly sessionID: string
@@ -45,6 +54,8 @@ export function render(activity: Activity): string {
       return `${head} — ${activity.summary}`
     case "paused":
       return `${head} — paused: ${activity.reason}`
+    case "form":
+      return renderForm({ id: activity.formID, title: activity.formTitle, fields: activity.fields })
     case "permission": {
       const what = activity.resources.length > 0 ? activity.resources.join(", ") : activity.action
       return [
@@ -139,3 +150,108 @@ export const published = (live: Live, now: number): Live => ({ ...live, publishe
 
 /** Whether the buffer holds anything worth showing. */
 export const hasText = (live: Live): boolean => live.body.trim().length > 0
+
+// --- forms ---------------------------------------------------------------
+//
+// A form is what the app asks when a run needs a decision: which of these, how many,
+// yes or no. The window renders it as fields with pickers; a chat has no pickers, so
+// the same fields are written out with their options numbered, and the answer comes
+// back as one line naming each field.
+
+/** One field of a form, as the renderer needs it. */
+export type FormField = {
+  readonly key: string
+  readonly type: string
+  readonly title?: string
+  readonly description?: string
+  readonly required?: boolean
+  readonly options?: ReadonlyArray<{ readonly value: string; readonly label: string }>
+  readonly default?: unknown
+}
+
+/** The line a field's answer is written on, and how its options are laid out. */
+export function renderForm(input: {
+  readonly id: string
+  readonly title: string
+  readonly fields: readonly FormField[]
+}): string {
+  const lines: string[] = [`❓ ${input.title}`, ""]
+  for (const field of input.fields) {
+    const label = field.title ?? field.key
+    const required = field.required === true ? " (required)" : ""
+    lines.push(`${label}${required} — ${field.type}`)
+    if (field.description !== undefined && field.description !== "") lines.push(`  ${field.description}`)
+    if (field.options !== undefined && field.options.length > 0) {
+      for (const option of field.options) lines.push(`  ${option.value} — ${option.label}`)
+    }
+    if (field.default !== undefined) lines.push(`  default: ${String(field.default)}`)
+    lines.push("")
+  }
+  lines.push("Answer with:")
+  lines.push(`/answer ${input.id} ${input.fields.map((f) => `${f.key}=...`).join(" ")}`)
+  if (input.fields.length === 1 && (input.fields[0]?.options?.length ?? 0) > 0) {
+    // One field with a list is the common case, and a bare value is unambiguous.
+    lines.push(`or just /answer ${input.id} <value>`)
+  }
+  return lines.join("\n")
+}
+
+/**
+ * Turns a reply into the answer object a form expects.
+ *
+ * `key=value` pairs, plus a bare value when the form has a single field. Values are
+ * read against the field's own type: a number is a number, a boolean takes yes/no/true/
+ * false, and a multiselect takes a comma-separated list. An unknown key is kept
+ * verbatim rather than dropped — the form's own validation is the authority on what is
+ * acceptable, and it reports the problem better than this can.
+ */
+export function parseFormAnswer(
+  fields: readonly FormField[],
+  rest: string,
+): { readonly answer: Record<string, unknown> } | { readonly error: string } {
+  const text = rest.trim()
+  if (text === "") return { error: "Nothing to answer with." }
+
+  const pairs = text
+    .split(/\s+/)
+    .map((token) => token.split("="))
+    .filter((parts) => parts.length >= 2)
+    .map(([key, ...value]) => [key!, value.join("=")] as const)
+
+  // A single bare word is only accepted when the form has one field, where there is
+  // nothing else it could mean.
+  const entries: ReadonlyArray<readonly [string, string]> =
+    pairs.length > 0 ? pairs : fields.length === 1 ? [[fields[0]!.key, text] as const] : []
+  if (entries.length === 0)
+    return { error: `Name each field: /answer <id> ${fields.map((f) => `${f.key}=...`).join(" ")}` }
+
+  const answer: Record<string, unknown> = {}
+  for (const [key, raw] of entries) {
+    const field = fields.find((candidate) => candidate.key === key)
+    if (field === undefined) {
+      answer[key] = raw
+      continue
+    }
+    answer[key] = coerce(field, raw)
+  }
+  return { answer }
+}
+
+function coerce(field: FormField, raw: string): unknown {
+  switch (field.type) {
+    case "number":
+    case "integer": {
+      const value = Number(raw)
+      return Number.isFinite(value) ? value : raw
+    }
+    case "boolean":
+      return ["yes", "y", "true", "on", "1"].includes(raw.toLowerCase())
+    case "multiselect":
+      return raw
+        .split(",")
+        .map((part) => part.trim())
+        .filter((part) => part !== "")
+    default:
+      return raw
+  }
+}

@@ -116,8 +116,18 @@ export class Info extends Schema.Class<Info>("Config.Info")({
   experimental: ConfigExperimental.Info.pipe(optional),
 }) {}
 
+/**
+ * A change to one setting, addressed by its path in the document.
+ *
+ * It was `{ shell: string | null }`, and `Config.update` applied only that one key —
+ * so a caller patching `compaction.buffer` or `provider.<id>.models.<id>.limit` had
+ * its value silently dropped: the object it built was accepted and then ignored,
+ * because only `["shell"]` was ever passed to the JSON editor. The path makes every
+ * setting in the document reachable.
+ */
 export const Patch = Schema.Struct({
-  shell: Schema.NullOr(Schema.String),
+  path: Schema.Array(Schema.String),
+  value: Schema.Json,
 }).annotate({ identifier: "Config.Patch" })
 export interface Patch extends Schema.Schema.Type<typeof Patch> {}
 

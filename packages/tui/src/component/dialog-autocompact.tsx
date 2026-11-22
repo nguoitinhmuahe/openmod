@@ -36,7 +36,11 @@ export function AutoCompactSetting(props: { onClose: () => void }) {
 
   const [busy, setBusy] = createSignal(false)
 
-  const model = () => local.model.selection()
+  // `model.current()` rather than `model.selection()`: the selection is only defined
+  // once a session is open, and this dialog is usually reached from the command
+  // palette, before any session exists. `current` is the model that would be used,
+  // which is the one whose window this is.
+  const model = () => local.model.current()
   const provider = () => model()?.providerID
   const modelID = () => model()?.modelID
 
@@ -90,9 +94,12 @@ export function AutoCompactSetting(props: { onClose: () => void }) {
           title="Auto compact"
           message={[
             `Context for ${p}/${m}: ${context.toLocaleString()} tokens.`,
-            `Compaction will run at ${threshold()}% — about ${Math.round((context * threshold()) / 100).toLocaleString()} tokens.`,
+            `Compaction runs at ${threshold()}% — about ${Math.round((context * threshold()) / 100).toLocaleString()} tokens.`,
             "",
-            "Open a new session for this to take effect.",
+            // No "open a new session": the runner loads the session's context on every
+            // step (session/runner/llm.ts), so the new window is in effect on the next
+            // turn of a session that is already open.
+            "Takes effect on the next turn.",
           ].join("\n")}
           onConfirm={props.onClose}
         />

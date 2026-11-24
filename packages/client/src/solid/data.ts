@@ -91,6 +91,18 @@ export type CreateDataInput = {
 }
 
 const messagePageLimit = 20
+
+/**
+ * How many messages one session may hold in memory.
+ *
+ * The store only ever grew: every page scrolled into view and every message admitted
+ * from an event stayed, so a long session kept its whole transcript in the renderer
+ * and several open sessions multiplied that. A window this size keeps the recent
+ * conversation, which is what is read and what the prompt needs; anything older is
+ * re-read from the server when it is scrolled back to, which is already how paging
+ * works.
+ */
+const messageHoldLimit = 400
 // Trailing window for event bursts that each ask for the same refetch.
 export const settleMs = 150
 
@@ -1970,7 +1982,11 @@ export function createData(config: CreateDataInput) {
             // A jump through history publishes once, not once per page of offscreen messages.
             const existing = store.session.message[sessionID] ?? []
             const ids = new Set(existing.map((item) => item.id))
-            const messages = [...fetched.reverse().filter((item) => !ids.has(item.id)), ...existing]
+            // Newest first within the held window: a jump into history must not evict
+            // the live tail the prompt is built from.
+            const messages = [...fetched.reverse().filter((item) => !ids.has(item.id)), ...existing].slice(
+              -messageHoldLimit,
+            )
             batch(() => {
               options?.beforePublish?.()
               messageIndex.set(sessionID, new Map(messages.map((item, position) => [item.id, position])))

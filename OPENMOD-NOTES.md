@@ -2,6 +2,8 @@
 
 Đây là bản fork của `anomalyco/opencode`, không phải upstream. Ghi lại những gì đã sửa để merge upstream không mất.
 
+Repo: https://github.com/nguoitinhmuahe/openmod (nhánh `dev`)
+
 ## Sửa trong lõi (dễ xung đột khi pull)
 
 **`packages/plugin/src/effect/tool.ts`** dòng ~45 và **`packages/plugin/src/promise/tool.ts`** dòng ~68:

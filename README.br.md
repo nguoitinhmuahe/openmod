@@ -1,17 +1,17 @@
 <p align="center">
-  <a href="https://opencode.ai">
+  <a href="https://github.com/nguoitinhmuahe/openmod">
     <picture>
       <source srcset=".github/assets/logo-ornate-dark.svg" media="(prefers-color-scheme: dark)">
       <source srcset=".github/assets/logo-ornate-light.svg" media="(prefers-color-scheme: light)">
-      <img src=".github/assets/logo-ornate-light.svg" alt="Logo do OpenCode">
+      <img src=".github/assets/logo-ornate-light.svg" alt="Logo do OpenMod">
     </picture>
   </a>
 </p>
 <p align="center">O agente de programação com IA de código aberto.</p>
 <p align="center">
-  <a href="https://opencode.ai/discord"><img alt="Discord" src="https://img.shields.io/discord/1391832426048651334?style=flat-square&label=discord" /></a>
-  <a href="https://www.npmjs.com/package/@opencode/cli"><img alt="npm" src="https://img.shields.io/npm/v/@opencode/cli?style=flat-square" /></a>
-  <a href="https://github.com/anomalyco/opencode/actions/workflows/release.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/anomalyco/opencode/release.yml?style=flat-square&branch=dev" /></a>
+  <a href="https://github.com/nguoitinhmuahe/openmod"><img alt="GitHub" src="https://img.shields.io/github/stars/nguoitinhmuahe/openmod?style=flat-square" /></a>
+  <a href="https://github.com/nguoitinhmuahe/openmod/blob/dev/LICENSE"><img alt="License" src="https://img.shields.io/github/license/nguoitinhmuahe/openmod?style=flat-square" /></a>
+  <a href="https://github.com/anomalyco/opencode"><img alt="Upstream" src="https://img.shields.io/badge/upstream-anomalyco%2Fopencode-555?style=flat-square" /></a>
 </p>
 
 <p align="center">
@@ -39,7 +39,12 @@
   <a href="README.vi.md">Tiếng Việt</a>
 </p>
 
-[![OpenCode Terminal UI](services/site/public/v1/docs/assets/lander/screenshot.png)](https://opencode.ai)
+> [!IMPORTANT]
+> **OpenMod is a fork** of [opencode](https://github.com/anomalyco/opencode), which is MIT licensed and copyright its authors.
+> The install commands, download links and `opencode.ai` URLs in this document refer to **upstream opencode**, not to this fork.
+> The OpenMod-specific changes are listed in [README.md](./README.md#whats-different) and [`OPENMOD-NOTES.md`](./OPENMOD-NOTES.md).
+
+[![OpenMod Terminal UI](services/site/public/v1/docs/assets/lander/screenshot.png)](https://github.com/nguoitinhmuahe/openmod)
 
 ---
 
@@ -64,7 +69,7 @@ nix run github:anomalyco/opencode  # Nix
 
 ### App desktop (BETA)
 
-O OpenCode também está disponível como aplicativo desktop. Baixe em [opencode.ai/download](https://opencode.ai/download).
+O OpenMod também está disponível como aplicativo desktop. Baixe em [opencode.ai/download](https://opencode.ai/download).
 
 | Plataforma            | Download                           |
 | --------------------- | ---------------------------------- |
@@ -80,11 +85,11 @@ brew install --cask opencode-desktop
 
 #### Diretório de instalação
 
-O script de instalação instala o OpenCode em `$HOME/.opencode/bin`.
+O script de instalação instala o OpenMod em `$HOME/.opencode/bin`.
 
 ### Agents
 
-O OpenCode inclui dois agents integrados, que você pode alternar com a tecla `Tab`.
+O OpenMod inclui dois agents integrados, que você pode alternar com a tecla `Tab`.
 
 - **build** - Padrão, agent com acesso total para trabalho de desenvolvimento
 - **plan** - Agent somente leitura para análise e exploração de código
@@ -99,16 +104,17 @@ Saiba mais sobre [agents](https://opencode.ai/docs/agents).
 
 ### Documentação
 
-Para mais informações sobre como configurar o OpenCode, [**veja nossa documentação**](https://opencode.ai/docs).
+Para mais informações sobre como configurar o OpenMod, [**veja nossa documentação**](https://opencode.ai/docs).
 
 ### Contribuir
 
-Se você tem interesse em contribuir com o OpenCode, leia os [contributing docs](./CONTRIBUTING.md) antes de enviar um pull request.
+Se você tem interesse em contribuir com o OpenMod, leia os [contributing docs](./CONTRIBUTING.md) antes de enviar um pull request.
 
-### Construindo com OpenCode
+### Attribution
 
-Se você estiver trabalhando em um projeto relacionado ao OpenCode e estiver usando "opencode" como parte do nome (por exemplo, "opencode-dashboard" ou "opencode-mobile"), adicione uma nota no README para deixar claro que não foi construído pela equipe do OpenCode e não é afiliado a nós de nenhuma forma.
+OpenMod is an independent fork of [opencode](https://github.com/anomalyco/opencode), Copyright (c) 2025 opencode, released under the [MIT License](./LICENSE). The original copyright notice and licence text are retained in full.
+
 
 ---
 
-**Junte-se à nossa comunidade** [Discord](https://discord.gg/opencode) | [X.com](https://x.com/opencode)
+**This fork:** [github.com/nguoitinhmuahe/openmod](https://github.com/nguoitinhmuahe/openmod) · **Upstream opencode:** [github.com/anomalyco/opencode](https://github.com/anomalyco/opencode)

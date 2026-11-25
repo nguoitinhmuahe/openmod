@@ -47,6 +47,7 @@ import { DialogIntegration } from "../dialog-integration"
 import { useConnected } from "../use-connected"
 import { useToast } from "../../ui/toast"
 import { createFadeIn } from "../../util/signal"
+import { createFlash } from "../../util/flash"
 import { DialogSkill } from "../dialog-skill"
 import { useConfig, useCursorStyle, useNewDesigns } from "../../config"
 import { usePromptMove } from "./move"
@@ -1604,7 +1605,10 @@ export function Prompt(props: PromptProps) {
   createEffect(() => {
     if (agentLabel()) revealedPromptMetadata.add(local)
   })
-  const borderHighlight = createMemo(() => tint(theme.border.base, highlight(), agentMetaAlpha()))
+  const keyFlash = createFlash(250)
+  const borderHighlight = createMemo(() =>
+    tint(tint(theme.border.base, highlight(), agentMetaAlpha()), theme.text.base, keyFlash.level() * 0.5),
+  )
   const footerInput = () => ({
     sessionID: props.sessionID,
     mode: store.mode,
@@ -1773,6 +1777,7 @@ export function Prompt(props: PromptProps) {
               maxHeight={maxHeight()}
               cursorStyle={cursorStyle()}
               onContentChange={() => {
+                keyFlash.pulse()
                 const value = input.plainText
                 setStore("prompt", "text", value)
                 auto()?.onInput(value)

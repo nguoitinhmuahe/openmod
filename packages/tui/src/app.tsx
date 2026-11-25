@@ -32,7 +32,6 @@ import {
   onMount,
   onCleanup,
   batch,
-  For,
   Show,
 } from "solid-js"
 import {
@@ -115,17 +114,6 @@ import { SessionTerminalsProvider } from "./context/session-terminals"
 import { ClientMcp } from "./context/client-mcp"
 import { PanelProvider, usePanel } from "./context/panel"
 import { SessionFrame } from "./component/session-frame"
-import { PEEK_MAX, SessionPeek } from "./component/session-peek"
-
-/**
- * The watched-sessions column.
- *
- * Bounded on both axes: at most a few panes, each a fixed narrow width whose text is
- * truncated rather than wrapped. That is what keeps a second, third and fourth session
- * from costing a second interface — `SessionPeek` draws a handful of strings, not a
- * transcript surface.
- */
-const PEEK_WIDTH = 44
 import { createTuiClipboard } from "./clipboard"
 
 const appGlobalBindingCommands = ["session.list", "session.new", "open.menu", "terminal.suspend"] as const
@@ -514,7 +502,6 @@ function App() {
   const dialog = useDialog()
   const local = useLocal()
   const sessionTabs = useSessionTabs()
-  const currentSessionID = () => (route.data.type === "session" ? route.data.sessionID : undefined)
   const panels = usePanel()
   const keymap = Keymap.use()
   const event = useEvent()
@@ -1442,17 +1429,6 @@ function App() {
     if (reconnectTimer) clearTimeout(reconnectTimer)
   })
 
-  // The other open sessions, so more than one can be watched without switching tabs.
-  // The one on screen is excluded — it has the whole surface — and each pane is drawn
-  // by `SessionPeek`, which shows a few lines rather than a second full interface. The
-  // cap is what keeps the cost bounded no matter how many tabs are open.
-  const watched = createMemo(() =>
-    sessionTabs
-      .tabs()
-      .filter((tab) => tab.sessionID !== currentSessionID())
-      .slice(-PEEK_MAX),
-  )
-
   return (
     <box
       width={dimensions().width}
@@ -1514,25 +1490,6 @@ function App() {
                 </Match>
               </Switch>
             </box>
-            <Show when={watched().length > 0}>
-              <box
-                flexShrink={0}
-                width={PEEK_WIDTH}
-                flexDirection="column"
-                minHeight={0}
-                border={["left"]}
-                borderColor={theme.border.base}
-              >
-                <For each={watched()}>
-                  {(tab) => (
-                    <SessionPeek
-                      sessionID={tab.sessionID}
-                      onSelect={() => route.navigate({ type: "session", sessionID: tab.sessionID })}
-                    />
-                  )}
-                </For>
-              </box>
-            </Show>
             <Slot path="app" />
           </Show>
         </box>

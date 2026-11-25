@@ -17,6 +17,8 @@ import { EOL, tmpdir } from "node:os"
 import { mkdir, writeFile } from "node:fs/promises"
 import { useRoute, useRouteData } from "../../context/route"
 import { createStore } from "solid-js/store"
+import { tint } from "../../theme/color"
+import { createFlash } from "../../util/flash"
 import { useData } from "../../context/data"
 import { SplitBorder } from "../../ui/border"
 import { useSessionLinks } from "../../ui/session-link"
@@ -24,14 +26,7 @@ import { useTuiPaths, useTuiTerminalEnvironment } from "../../context/runtime"
 import { Spinner, SPINNER_FRAMES } from "../../component/spinner"
 import { PatchDiff } from "../../component/patch-diff"
 import { useTheme, useThemes } from "../../context/theme"
-import {
-  BoxRenderable,
-  ScrollBoxRenderable,
-  addDefaultParsers,
-  TextAttributes,
-  RGBA,
-  MouseEvent,
-} from "@opentui/core"
+import { BoxRenderable, ScrollBoxRenderable, addDefaultParsers, TextAttributes, RGBA, MouseEvent } from "@opentui/core"
 import { Prompt, type PromptRef } from "../../component/prompt"
 import {
   mediaHashFromUri,
@@ -1281,7 +1276,9 @@ export function Session(props: {
       },
       run: () => {
         const lastAssistantMessage = messagesBeforeRevert().findLast(
-          (msg) => msg.type === "assistant" || (msg.type === "compaction" && msg.status === "completed" && msg.summary.trim() !== ""),
+          (msg) =>
+            msg.type === "assistant" ||
+            (msg.type === "compaction" && msg.status === "completed" && msg.summary.trim() !== ""),
         )
         if (!lastAssistantMessage) {
           toast.show({ message: "No assistant messages found", variant: "error" })
@@ -1587,9 +1584,7 @@ export function Session(props: {
                   onMouseOut={() => setLatestHovered(false)}
                   onMouseUp={toBottom}
                 >
-                  <text
-                    fg={latestHovered() ? theme.text.action.secondary.hovered : theme.text.action.secondary.base}
-                  >
+                  <text fg={latestHovered() ? theme.text.action.secondary.hovered : theme.text.action.secondary.base}>
                     Jump to latest ↓
                   </text>
                 </box>
@@ -1635,12 +1630,7 @@ export function Session(props: {
                     }}
                   </Show>
                 </Match>
-                <Match
-                  when={
-                    session() &&
-                    currentLocation.error?.location.directory === session()!.location.directory
-                  }
-                >
+                <Match when={session() && currentLocation.error?.location.directory === session()!.location.directory}>
                   <SessionLocationMissing
                     directory={session()!.location.directory}
                     projectID={session()!.projectID}
@@ -2938,9 +2928,7 @@ function BlockTool(props: BlockToolProps) {
               <Show
                 when={props.spinner}
                 fallback={
-                  <text
-                    fg={permission() ? theme.text.feedback.warning.base : (props.headerColor ?? theme.text.muted)}
-                  >
+                  <text fg={permission() ? theme.text.feedback.warning.base : (props.headerColor ?? theme.text.muted)}>
                     {title()}
                   </text>
                 }
@@ -3140,11 +3128,7 @@ function ShellDisplay(props: {
           <Show
             when={isRunning()}
             fallback={
-              <text
-                fg={theme.text.base}
-                wrapMode={expanded() ? "word" : "char"}
-                maxHeight={expanded() ? undefined : 2}
-              >
+              <text fg={theme.text.base} wrapMode={expanded() ? "word" : "char"} maxHeight={expanded() ? undefined : 2}>
                 {limitedInput()}
               </text>
             }
@@ -3245,7 +3229,9 @@ function Read(props: ToolProps) {
         Read {pathFormatter.format(stringValue(props.input.path))}
         <Show when={props.input.offset !== undefined || props.input.limit !== undefined}>
           :{finiteNumber(props.input.offset) || 1}-
-          {props.input.limit ? (finiteNumber(props.input.offset) || 1) + (finiteNumber(props.input.limit) || 0) - 1 : ""}
+          {props.input.limit
+            ? (finiteNumber(props.input.offset) || 1) + (finiteNumber(props.input.limit) || 0) - 1
+            : ""}
         </Show>
       </InlineTool>
       <For each={loaded()}>
@@ -3461,6 +3447,7 @@ function Execute(props: ToolProps) {
 function Edit(props: ToolProps) {
   const ctx = use()
   const theme = useTheme()
+  const diffFlash = createFlash(900, true)
   const { currentSyntax: syntax } = useThemes()
   const pathFormatter = usePathFormatter()
 
@@ -3491,8 +3478,8 @@ function Edit(props: ToolProps) {
                 width="100%"
                 wrapMode={ctx.diffWrapMode()}
                 fg={theme.text.base}
-                addedBg={theme.diff.background.added}
-                removedBg={theme.diff.background.removed}
+                addedBg={tint(theme.diff.background.added, theme.diff.highlight.added, diffFlash.level() * 0.5)}
+                removedBg={tint(theme.diff.background.removed, theme.diff.highlight.removed, diffFlash.level() * 0.5)}
                 contextBg={theme.diff.background.context}
                 addedSignColor={theme.diff.highlight.added}
                 removedSignColor={theme.diff.highlight.removed}
@@ -3525,6 +3512,7 @@ function Edit(props: ToolProps) {
 function ApplyPatch(props: ToolProps) {
   const ctx = use()
   const theme = useTheme()
+  const diffFlash = createFlash(900, true)
   const { currentSyntax: syntax } = useThemes()
   const pathFormatter = usePathFormatter()
   const files = createMemo(() => parseApplyPatchFiles(props.metadata.files))
@@ -3581,8 +3569,12 @@ function ApplyPatch(props: ToolProps) {
                       width="100%"
                       wrapMode={ctx.diffWrapMode()}
                       fg={theme.text.base}
-                      addedBg={theme.diff.background.added}
-                      removedBg={theme.diff.background.removed}
+                      addedBg={tint(theme.diff.background.added, theme.diff.highlight.added, diffFlash.level() * 0.5)}
+                      removedBg={tint(
+                        theme.diff.background.removed,
+                        theme.diff.highlight.removed,
+                        diffFlash.level() * 0.5,
+                      )}
                       contextBg={theme.diff.background.context}
                       addedSignColor={theme.diff.highlight.added}
                       removedSignColor={theme.diff.highlight.removed}

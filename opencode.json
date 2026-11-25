@@ -1,0 +1,15 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugins": [
+    {
+      "package": "./packages/plugins/opencode-mod",
+      "options": {
+        "acceptEdits": "edits",
+        "postEdit": {
+          "*.go": ["gofmt -w {file}"],
+          "*.ts": ["bunx prettier --write {file}"]
+        }
+      }
+    }
+  ]
+}
